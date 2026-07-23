@@ -13,7 +13,7 @@ async function callGemini(user, text, state, isUserBActive) {
   const isAlreadyShielded = user.lastShieldUsedDate === currentDateStr;
 
   const systemInstructionText = `
-Eres el cerebro de un bot de Telegram inteligente e informal llamado "English Tracker Bot". Tu objetivo es registrar la práctica de inglés de dos estudiantes: Juan (de Argentina, usa español rioplatense informal con che, racha, etc.) y su hermana/compañera (de México, usa español mexicano).
+Eres el cerebro de un bot de Telegram inteligente e informal llamado "English Tracker Bot". Tu objetivo es registrar la práctica de inglés de dos estudiantes o compañeros de estudio.
 
 Tu tarea es analizar el mensaje del usuario y responder con un JSON estructurado que contenga:
 1. "intent": Clasificación de la intención del mensaje. Valores posibles:
@@ -24,7 +24,7 @@ Tu tarea es analizar el mensaje del usuario y responder con un JSON estructurado
    - "chat": Conversación casual, agradecimientos ("gracias", "ok", "jaja"), o mensajes breves que no son comandos ni frases.
 2. "englishPhrase": (Solo para "done") La frase en inglés extraída y limpia de prefijos en español (ej. si dice "hoy aprendí: Today is sunny", extraer "Today is sunny").
 3. "isEnglishValid": (Solo para "done") true si la frase está en inglés, tiene 10 o más caracteres de texto en inglés y tiene coherencia para ser una práctica. De lo contrario, false.
-4. "dynamicReply": Una respuesta en español personalizada para el usuario (usando jerga de Argentina si es Juan, o de México si es su compañera).
+4. "dynamicReply": Una respuesta en español personalizada para el usuario (usando un tono informal, alegre y motivador).
    - Si es "start": bienvenida y explicación alegre de cómo usar el bot (sin usar barras "/" si no quieren).
    - Si es "shield": confirmación de que descanse tranquilo (menciona si ya lo había activado o si ya hizo la tarea hoy basándote en los datos del usuario).
    - Si es "done" y es válida: felicitación alegre y un tip gramatical muy breve o sugerencia de vocabulario sobre su frase en inglés.
@@ -35,7 +35,6 @@ Tu tarea es analizar el mensaje del usuario y responder con un JSON estructurado
   const promptContent = `
 DATOS DEL USUARIO:
 - Nombre: ${user.name}
-- Rol: ${user.timezone.includes('Buenos_Aires') ? 'Juan (Argentina)' : 'México'}
 - Racha actual: ${user.streak} días
 - Escudos restantes: ${user.shields} / 2
 - ¿Ya hizo check-in hoy? ${isAlreadyDone ? 'Sí' : 'No'}
@@ -335,11 +334,11 @@ export default async function handler(req, res) {
 
       const report = reportHeader +
         `📊 <b>ESTADO DE CONSTANCIA EN INGLÉS</b> 🇬🇧\n\n` +
-        `👦 <b>${state.users.userA.name}</b> (Argentina 🇦🇷)\n` +
+        `👤 <b>${state.users.userA.name}</b>\n` +
         `🔥 <b>Racha:</b> ${state.users.userA.streak} días\n` +
         `🛡️ <b>Escudos:</b> ${state.users.userA.shields} / 2\n` +
         `⚡ <b>Hoy:</b> ${statusA}\n\n` +
-        `👧 <b>${state.users.userB.name}</b> (México 🇲🇽)\n` +
+        `👤 <b>${state.users.userB.name}</b>\n` +
         `${streakB}\n` +
         `${shieldsB}\n` +
         `⚡ <b>Hoy:</b> ${statusB}\n\n` +

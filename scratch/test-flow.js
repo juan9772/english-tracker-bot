@@ -5,8 +5,8 @@ import { getLocalDateString, getPreviousDateString } from '../api/_time.js';
 
 // Setup Mock Environment
 process.env.MOCK_KV = 'true';
-process.env.USER_A_USERNAME = 'juan9772';
-process.env.USER_A_NAME = 'Juan';
+process.env.USER_A_USERNAME = 'user_a_username';
+process.env.USER_A_NAME = 'User A';
 process.env.TELEGRAM_BOT_TOKEN = 'mock_bot_token';
 process.env.TELEGRAM_CHAT_ID = '-100123456789';
 process.env.GEMINI_API_KEY = 'mock_gemini_api_key';
@@ -138,7 +138,7 @@ async function sendWebhookMessage(username, text, userId = '11111', chatType = '
         message_id: Math.floor(Math.random() * 10000),
         from: {
           id: userId,
-          first_name: username === 'juan9772' ? 'Juan' : 'Sister',
+          first_name: username === 'user_a_username' ? 'User A' : 'User B',
           username: username
         },
         chat: {
@@ -218,7 +218,7 @@ async function runTests() {
   // --- TEST CASE 1: Start Command ---
   console.log('\n--- Test 1: Register User A with /start ---');
   clearFetchCalls();
-  const res1 = await sendWebhookMessage('juan9772', 'hola bot');
+  const res1 = await sendWebhookMessage('user_a_username', 'hola bot');
   
   assert(res1.statusCode === 200, 'Webhook returns 200 on /start');
   assert(fetchCalls.length === 1, 'Sent exactly 1 Telegram message');
@@ -227,12 +227,12 @@ async function runTests() {
   let state = await getState();
   assert(state.chatId === -100123456789, 'Chat ID is saved in state');
   assert(state.users.userA.id === '11111', 'User A ID is registered');
-  assert(state.users.userA.username === 'juan9772', 'User A username is registered');
+  assert(state.users.userA.username === 'user_a_username', 'User A username is registered');
 
   // --- TEST CASE 2: Invalid /done phrase length ---
   console.log('\n--- Test 2: Validation of short phrase on /done ---');
   clearFetchCalls();
-  const res2 = await sendWebhookMessage('juan9772', 'short');
+  const res2 = await sendWebhookMessage('user_a_username', 'short');
   assert(fetchCalls.length === 1, 'Telegram message sent');
   assert(fetchCalls[0].body.text.includes('al menos 10 caracteres'), 'Warning about short phrase sent');
   
@@ -242,7 +242,7 @@ async function runTests() {
   // --- TEST CASE 3: Valid /done command ---
   console.log('\n--- Test 3: Valid check-in on /done ---');
   clearFetchCalls();
-  const res3 = await sendWebhookMessage('juan9772', 'Today I learned dynamic imports in Node ESM.');
+  const res3 = await sendWebhookMessage('user_a_username', 'Today I learned dynamic imports in Node ESM.');
   assert(fetchCalls.length === 1, 'Success message sent to Telegram');
   assert(fetchCalls[0].body.text.includes('Tu racha actual ahora es de 🔥 <b>1 días</b>'), 'Correct streak announced');
   
@@ -253,7 +253,7 @@ async function runTests() {
   // --- TEST CASE 4: Done already registered today ---
   console.log('\n--- Test 4: Prevent double check-in ---');
   clearFetchCalls();
-  const res4 = await sendWebhookMessage('juan9772', 'Today I also learned how to use Vercel Serverless KV.');
+  const res4 = await sendWebhookMessage('user_a_username', 'Today I also learned how to use Vercel Serverless KV.');
   assert(fetchCalls.length === 1, 'Message about already registering today sent');
   assert(fetchCalls[0].body.text.includes('Ya registré tu práctica de hoy'), 'Double check-in ignored message matches');
   
@@ -263,7 +263,7 @@ async function runTests() {
   // --- TEST CASE 5: Use shield command ---
   console.log('\n--- Test 5: Try to use shield after already completing the day ---');
   clearFetchCalls();
-  const res5 = await sendWebhookMessage('juan9772', 'necesito un escudo');
+  const res5 = await sendWebhookMessage('user_a_username', 'necesito un escudo');
   assert(fetchCalls[0].body.text.includes('no necesitas gastar un escudo'), 'Correctly tells user shield is not needed');
   
   state = await getState();
@@ -283,7 +283,7 @@ async function runTests() {
   // --- TEST CASE 6: Use shield on new day ---
   console.log('\n--- Test 6: Activate shield on a blank day ---');
   clearFetchCalls();
-  const res6 = await sendWebhookMessage('juan9772', 'quiero usar mi escudo');
+  const res6 = await sendWebhookMessage('user_a_username', 'quiero usar mi escudo');
   assert(fetchCalls[0].body.text.includes('Escudo activado para hoy'), 'Confirmation of shield activation sent');
   assert(fetchCalls[0].body.text.includes('Te quedan <b>1 escudos</b>'), 'Correct shields count reported');
   
@@ -294,7 +294,7 @@ async function runTests() {
   // --- TEST CASE 7: Shield Refund when checking in later ---
   console.log('\n--- Test 7: Refund shield when checking in later same day ---');
   clearFetchCalls();
-  const res7 = await sendWebhookMessage('juan9772', 'I decided to study English after all today!');
+  const res7 = await sendWebhookMessage('user_a_username', 'I decided to study English after all today!');
   assert(fetchCalls[0].body.text.includes('te devolví el escudo'), 'Refund notification present in success message');
   assert(fetchCalls[0].body.text.includes('Tu racha actual ahora es de 🔥 <b>2 días</b>'), 'Streak increased to 2');
   
@@ -306,7 +306,7 @@ async function runTests() {
   // --- TEST CASE 8: Status check ---
   console.log('\n--- Test 8: Get status of participants ---');
   clearFetchCalls();
-  const res8 = await sendWebhookMessage('juan9772', 'ver racha');
+  const res8 = await sendWebhookMessage('user_a_username', 'ver racha');
   assert(fetchCalls[0].body.text.includes('Racha:</b> 2 días'), 'Status shows correct streak for Juan');
   assert(fetchCalls[0].body.text.includes('Escudos:</b> 2 / 2'), 'Status shows correct shields for Juan');
   assert(fetchCalls[0].body.text.includes('Esperando conexión...'), 'Sister displays as waiting for connection');
