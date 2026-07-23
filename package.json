@@ -1,0 +1,12 @@
+{
+  "name": "telegram-english-bot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node scratch/test-flow.js"
+  },
+  "dependencies": {
+    "@vercel/kv": "^1.0.1"
+  }
+}
