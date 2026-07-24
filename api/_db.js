@@ -6,8 +6,14 @@ let kvClient = null;
 
 async function getKvClient() {
   if (!kvClient) {
-    const url = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
-    const token = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
+    const url = (process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL || '').trim();
+    const token = (process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN || '').trim();
+    
+    if (!url || !token) {
+      console.warn('Redis REST URL or Token is missing in environment variables. Falling back to in-memory state.');
+      return null;
+    }
+    
     const { Redis } = await import('@upstash/redis');
     kvClient = new Redis({ url, token });
   }
@@ -27,6 +33,10 @@ export async function getState() {
   
   try {
     const kv = await getKvClient();
+    if (!kv) {
+      if (!mockState) mockState = getInitialState();
+      return JSON.parse(JSON.stringify(mockState));
+    }
     const state = await kv.get(KV_STATE_KEY);
     if (!state) {
       const initial = getInitialState();
@@ -35,8 +45,9 @@ export async function getState() {
     }
     return typeof state === 'string' ? JSON.parse(state) : state;
   } catch (err) {
-    console.error('Error getting state from Vercel KV, returning initial state:', err);
-    return getInitialState();
+    console.error('Error getting state from Redis KV, falling back to initial state:', err);
+    if (!mockState) mockState = getInitialState();
+    return JSON.parse(JSON.stringify(mockState));
   }
 }
 
@@ -51,10 +62,14 @@ export async function saveState(state) {
   
   try {
     const kv = await getKvClient();
+    if (!kv) {
+      mockState = JSON.parse(JSON.stringify(state));
+      return;
+    }
     await kv.set(KV_STATE_KEY, state);
   } catch (err) {
-    console.error('Error saving state to Vercel KV:', err);
-    throw err;
+    console.error('Error saving state to Redis KV:', err);
+    mockState = JSON.parse(JSON.stringify(state));
   }
 }
 
