@@ -1,0 +1,57 @@
+export default function handler(req, res) {
+  if (typeof res?.status === 'function') {
+    return res.status(200).send(`
+      <!DOCTYPE html>
+      <html lang="es">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Telegram English Tracker Bot</title>
+        <style>
+          body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #0f172a;
+            color: #f8fafc;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+          }
+          .card {
+            background: #1e293b;
+            padding: 2.5rem;
+            border-radius: 1rem;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+            text-align: center;
+            max-width: 450px;
+            border: 1px solid #334155;
+          }
+          .badge {
+            display: inline-block;
+            background: #10b981;
+            color: #064e3b;
+            font-weight: bold;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.875rem;
+            margin-bottom: 1rem;
+          }
+          h1 { margin: 0 0 0.5rem 0; font-size: 1.75rem; }
+          p { color: #94a3b8; line-height: 1.5; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <div class="badge">● Online</div>
+          <h1>Telegram English Bot</h1>
+          <p>El bot está activo y funcionando en producción con Gemini AI y Vercel Serverless.</p>
+        </div>
+      </body>
+      </html>
+    `);
+  }
+  res.statusCode = 200;
+  res.setHeader('Content-Type', 'text/html');
+  res.end('<h1>Telegram English Bot is Online</h1>');
+}

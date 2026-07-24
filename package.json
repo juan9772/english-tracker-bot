@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "main": "api/index.js",
   "scripts": {
     "test": "node scratch/test-flow.js"
   },
