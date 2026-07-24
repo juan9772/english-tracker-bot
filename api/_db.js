@@ -6,15 +6,10 @@ let kvClient = null;
 
 async function getKvClient() {
   if (!kvClient) {
-    // Map Upstash Redis env vars if Vercel created Upstash Redis integration instead of KV
-    if (!process.env.KV_REST_API_URL && process.env.UPSTASH_REDIS_REST_URL) {
-      process.env.KV_REST_API_URL = process.env.UPSTASH_REDIS_REST_URL;
-    }
-    if (!process.env.KV_REST_API_TOKEN && process.env.UPSTASH_REDIS_REST_TOKEN) {
-      process.env.KV_REST_API_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
-    }
-    const { kv } = await import('@vercel/kv');
-    kvClient = kv;
+    const url = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
+    const token = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
+    const { Redis } = await import('@upstash/redis');
+    kvClient = new Redis({ url, token });
   }
   return kvClient;
 }
