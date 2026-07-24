@@ -115,7 +115,15 @@ export default async function handler(req, res) {
     return respond(res, 405, { error: 'Method Not Allowed' });
   }
 
-  const update = req.body || {};
+  let update = req.body;
+  if (typeof update === 'string') {
+    try {
+      update = JSON.parse(update);
+    } catch (e) {
+      update = {};
+    }
+  }
+  update = update || {};
   
   // Log update for debugging in Vercel logs
   console.log('Received Telegram Update:', JSON.stringify(update));

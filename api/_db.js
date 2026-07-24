@@ -115,8 +115,8 @@ export function findUserKey(state, msg) {
   if (state.users.userB.id === fromId) return 'userB';
   
   // 2. Check if username matches env vars
-  const envAUser = (process.env.USER_A_USERNAME || '').toLowerCase();
-  const envBUser = (process.env.USER_B_USERNAME || '').toLowerCase();
+  const envAUser = (process.env.USER_A_USERNAME || '').replace(/^@/, '').toLowerCase().trim();
+  const envBUser = (process.env.USER_B_USERNAME || '').replace(/^@/, '').toLowerCase().trim();
   
   if (envAUser && fromUsername === envAUser) {
     return 'userA';

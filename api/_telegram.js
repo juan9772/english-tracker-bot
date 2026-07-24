@@ -3,7 +3,7 @@
  * Uses the native global fetch API (Node 18+).
  */
 export async function sendTelegramMessage(chatId, text) {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const token = (process.env.TELEGRAM_BOT_TOKEN || '').trim();
   if (!token) {
     console.warn('TELEGRAM_BOT_TOKEN environment variable is not defined.');
     return false;
