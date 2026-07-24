@@ -147,5 +147,11 @@ export function findUserKey(state, msg) {
   if (envAId && fromId === envAId) return 'userA';
   if (envBId && fromId === envBId) return 'userB';
   
+  // 4. Auto-bind User B: If sender is not a bot, not User A, and User B isn't bound yet,
+  // automatically register this sender as User B (ideal when User B doesn't have a Telegram @username)
+  if (!msg.from.is_bot && !state.users.userB.id) {
+    return 'userB';
+  }
+
   return null;
 }
