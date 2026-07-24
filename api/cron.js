@@ -1,6 +1,7 @@
 import { getState, saveState } from './_db.js';
 import { sendTelegramMessage } from './_telegram.js';
 import { getLocalDateString, getPreviousDateString, getLocalDateParts, getDayOfWeek } from './_time.js';
+import { processQueue } from './_queue.js';
 
 function respond(res, code, body) {
   if (typeof res?.status === 'function') {
@@ -28,6 +29,10 @@ export default async function handler(req, res) {
 
   try {
     const state = await getState();
+
+    // Process any messages in the queue first
+    await processQueue(state);
+
     const announcementChatId = state.chatId || process.env.TELEGRAM_CHAT_ID;
     
     // Check if User B is configured
@@ -120,6 +125,14 @@ export default async function handler(req, res) {
           }
         }
       }
+    }
+
+    // Always add a friendly cron execution notification message if chatId is available
+    if (announcementChatId) {
+      messagesToSend.push({
+        chatId: announcementChatId,
+        text: `⏰ <b>[Verificación Diaria]</b> 🤖\n\nEl bot ha ejecutado la revisión de constancia y procesado la cola de mensajes con éxito. ¡A seguir practicando! 💪\n\n<i>Daily reminder:</i> "Don't stop until you're proud! 🚀"`
+      });
     }
 
     if (stateChanged) {

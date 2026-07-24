@@ -11,12 +11,28 @@ process.env.TELEGRAM_BOT_TOKEN = 'mock_bot_token';
 process.env.TELEGRAM_CHAT_ID = '-100123456789';
 process.env.GEMINI_API_KEY = 'mock_gemini_api_key';
 
+let geminiSimulatedStatus = 200;
+
 // Intercept Fetch calls
 const fetchCalls = [];
 globalThis.fetch = async (url, options) => {
   const body = options && options.body ? JSON.parse(options.body) : {};
   
   if (url.includes('generativelanguage.googleapis.com')) {
+    if (geminiSimulatedStatus !== 200) {
+      return {
+        ok: false,
+        status: geminiSimulatedStatus,
+        text: async () => JSON.stringify({
+          error: {
+            code: geminiSimulatedStatus,
+            message: "This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.",
+            status: "UNAVAILABLE"
+          }
+        })
+      };
+    }
+
     const promptText = body.contents?.[0]?.parts?.[0]?.text || '';
     
     // Extract user message from promptText
@@ -90,6 +106,7 @@ globalThis.fetch = async (url, options) => {
 
     return {
       ok: true,
+      status: 200,
       text: async () => JSON.stringify(responseJson),
       json: async () => responseJson
     };
@@ -98,6 +115,7 @@ globalThis.fetch = async (url, options) => {
   fetchCalls.push({ url, body });
   return {
     ok: true,
+    status: 200,
     text: async () => '{"ok":true}',
     json: async () => ({ ok: true })
   };
@@ -317,54 +335,77 @@ async function runTests() {
   clearFetchCalls();
   const cronRes9 = await triggerCron();
   assert(cronRes9.statusCode === 200, 'Cron triggers successfully');
-  assert(fetchCalls.length === 0, 'No warning messages (User A completed successfully yesterday)');
+  assert(fetchCalls.some(c => c.body.text.includes('Verificación Diaria')), 'Cron execution notification message was sent');
   
   state = await getState();
   assert(state.users.userA.lastEvaluatedDate === getPreviousDateString(getLocalDateString(new Date(), state.users.userA.timezone)), 'lastEvaluatedDate updated to yesterday');
 
-  // --- TEST CASE 10: Cron running (User missed, Auto-shield consumption) ---
-  console.log('\n>>> Advancing time by 24 hours (into Wednesday afternoon, User A missed Tuesday) ...');
-  advanceTime(24 * 60 * 60 * 1000);
+  // --- TEST CASE 10: Gemini 503 Error and Message Queueing ---
+  console.log('\n--- Test 10: Gemini 503 Error & Queueing Message ---');
+  geminiSimulatedStatus = 503;
+  clearFetchCalls();
+
+  const res10 = await sendWebhookMessage('user_a_username', 'Today I learned about exponential backoff retries and queueing.');
+  assert(res10.responseData === 'Message queued due to Gemini unavailable', 'Webhook queued message when Gemini returned 503');
+  assert(fetchCalls.length === 1, 'Sent Telegram notice to user');
+  assert(fetchCalls[0].body.text.includes('Guardé tu mensaje en la cola de espera y te responderé más tarde'), 'Telegram notice informed user they will be answered later');
+
+  state = await getState();
+  assert(state.queue && state.queue.length === 1, '1 item present in state.queue');
+  assert(state.queue[0].text === 'Today I learned about exponential backoff retries and queueing.', 'Queued text matches');
+
+  // --- TEST CASE 11: Drain Queue when Gemini recovers ---
+  console.log('\n--- Test 11: Drain Queue when Gemini recovers ---');
+  geminiSimulatedStatus = 200; // Gemini is back online!
+  clearFetchCalls();
+
+  // Triggering cron or next webhook drains the queue
+  await triggerCron();
+
+  state = await getState();
+  assert(!state.queue || state.queue.length === 0, 'Queue is empty after drain');
+  assert(state.users.userA.streak === 3, 'Streak increased to 3 after processing queued check-in');
+  assert(fetchCalls.some(c => c.body.text.includes('Tu racha actual ahora es de 🔥 <b>3 días</b>')), 'Sent completion Telegram response for queued item');
+
+  // --- TEST CASE 12: Cron running (User missed Wednesday, Auto-shield consumption on Thursday) ---
+  console.log('\n>>> Advancing time by 48 hours (into Thursday afternoon, User A missed Wednesday) ...');
+  advanceTime(48 * 60 * 60 * 1000);
   clearFetchCalls();
   
-  // Note: we do NOT do /done on Tuesday, so they missed it
-  const cronRes10 = await triggerCron();
-  assert(cronRes10.statusCode === 200, 'Cron triggers successfully');
-  assert(fetchCalls.length === 1, 'Sent 1 warning message (Auto-shield used)');
-  assert(fetchCalls[0].body.text.includes('se ha salvado usando un escudo automático'), 'Shield warning content matches');
+  const cronRes12 = await triggerCron();
+  assert(cronRes12.statusCode === 200, 'Cron triggers successfully');
+  assert(fetchCalls.some(c => c.body.text.includes('se ha salvado usando un escudo automático')), 'Shield warning content matches');
   
   state = await getState();
   assert(state.users.userA.shields === 1, 'Shield count decremented to 1 by cron');
-  assert(state.users.userA.streak === 2, 'Streak is saved and stays at 2');
+  assert(state.users.userA.streak === 3, 'Streak is saved and stays at 3');
 
-  // --- TEST CASE 11: Cron running (User missed, no shields left -> Reset Streak & Penalty) ---
-  console.log('\n>>> Advancing time by 24 hours (into Thursday afternoon, User A missed Wednesday)...');
+  // --- TEST CASE 13: Cron running (User missed Thursday, no shields left -> Reset Streak & Penalty) ---
+  console.log('\n>>> Advancing time by 24 hours (into Friday afternoon, User A missed Thursday)...');
   advanceTime(24 * 60 * 60 * 1000);
   
-  // Consume the remaining shield (Wednesday midnight to Thursday transition)
+  // Consume the remaining shield (Thursday transition)
   clearFetchCalls();
   await triggerCron(); // This consumes the 2nd shield
   
   state = await getState();
   assert(state.users.userA.shields === 0, 'Shields count is now 0');
-  assert(state.users.userA.streak === 2, 'Streak is still 2');
+  assert(state.users.userA.streak === 3, 'Streak is still 3');
 
-  console.log('\n>>> Advancing time by 24 hours (into Friday afternoon, User A missed Thursday, 0 shields left)...');
+  console.log('\n>>> Advancing time by 24 hours (into Saturday afternoon, User A missed Friday, 0 shields left)...');
   advanceTime(24 * 60 * 60 * 1000);
   clearFetchCalls();
   
   await triggerCron(); // No shields left!
-  assert(fetchCalls.length === 1, 'Sent 1 warning message (Streak broken)');
-  assert(fetchCalls[0].body.text.includes('LA CONSTANCIA SE HA ROTO'), 'Broken streak banner present');
-  assert(fetchCalls[0].body.text.includes('PENALIZACIÓN:'), 'Penalty details present');
+  assert(fetchCalls.some(c => c.body.text.includes('LA CONSTANCIA SE HA ROTO')), 'Broken streak banner present');
+  assert(fetchCalls.some(c => c.body.text.includes('PENALIZACIÓN:')), 'Penalty details present');
   
   state = await getState();
   assert(state.users.userA.streak === 0, 'Streak is reset to 0');
 
-  // --- TEST CASE 12: Weekly reset on Monday ---
+  // --- TEST CASE 14: Weekly reset on Monday ---
   console.log('\n>>> Advancing time to next Monday afternoon...');
-  // Current day is Friday afternoon, let's just advance 3 days to hit Monday afternoon
-  advanceTime(3 * 24 * 60 * 60 * 1000);
+  advanceTime(2 * 24 * 60 * 60 * 1000);
   clearFetchCalls();
   
   await triggerCron();
