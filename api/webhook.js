@@ -94,20 +94,35 @@ MENSAJE DEL USUARIO:
   }
 }
 
+function respond(res, code, body) {
+  if (typeof res?.status === 'function') {
+    if (typeof body === 'object') return res.status(code).json(body);
+    return res.status(code).send(body);
+  }
+  if (res) {
+    res.statusCode = code;
+    if (typeof body === 'object') {
+      res.setHeader('Content-Type', 'application/json');
+      return res.end(JSON.stringify(body));
+    }
+    return res.end(String(body));
+  }
+}
+
 export default async function handler(req, res) {
   // Ensure it's a POST request
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method Not Allowed' });
+    return respond(res, 405, { error: 'Method Not Allowed' });
   }
 
-  const update = req.body;
+  const update = req.body || {};
   
   // Log update for debugging in Vercel logs
   console.log('Received Telegram Update:', JSON.stringify(update));
 
   const msg = update.message;
   if (!msg || !msg.text) {
-    return res.status(200).send('No processable text found in update');
+    return respond(res, 200, 'No processable text found in update');
   }
 
   const text = msg.text.trim();
@@ -122,7 +137,7 @@ export default async function handler(req, res) {
         `<i>English note:</i> "Only registered members can join the challenge! Let's get configured first!" ⚙️`;
       
       await sendTelegramMessage(msg.chat.id, replyMsg);
-      return res.status(200).send('Unregistered user');
+      return respond(res, 200,'Unregistered user');
     }
 
     const user = state.users[userKey];
@@ -159,7 +174,7 @@ export default async function handler(req, res) {
     } else {
       // Fallback: Detect commands starting with "/"
       if (!text.startsWith('/')) {
-        return res.status(200).send('Not a command');
+        return respond(res, 200,'Not a command');
       }
 
       // Parse command name and args
@@ -172,7 +187,7 @@ export default async function handler(req, res) {
 
       const ALLOWED_COMMANDS = ['start', 'done', 'shield', 'status'];
       if (!ALLOWED_COMMANDS.includes(command)) {
-        return res.status(200).send('Command ignored');
+        return respond(res, 200,'Command ignored');
       }
     }
 
@@ -180,7 +195,7 @@ export default async function handler(req, res) {
       if (geminiResult && geminiResult.dynamicReply) {
         await sendTelegramMessage(msg.chat.id, geminiResult.dynamicReply);
       }
-      return res.status(200).send('Casual chat processed');
+      return respond(res, 200,'Casual chat processed');
     }
 
     if (command === 'start') {
@@ -195,7 +210,7 @@ export default async function handler(req, res) {
         `<i>Remember:</i> "Consistency is the key to mastering any language! Let's do this!" 🚀`;
 
       await sendTelegramMessage(msg.chat.id, welcome);
-      return res.status(200).send('Start command processed');
+      return respond(res, 200,'Start command processed');
     }
 
     if (command === 'done') {
@@ -213,7 +228,7 @@ export default async function handler(req, res) {
           `<i>Try again!</i> "You can do better, I believe in you! 💪"`;
         
         await sendTelegramMessage(msg.chat.id, exampleText);
-        return res.status(200).send('Done phrase too short or invalid');
+        return respond(res, 200,'Done phrase too short or invalid');
       }
 
       // Check if already checked in
@@ -223,7 +238,7 @@ export default async function handler(req, res) {
           `<i>Well done!</i> "Keep shining and enjoy your rest! ✨"`;
         
         await sendTelegramMessage(msg.chat.id, doubleCheckInMsg);
-        return res.status(200).send('Done already registered');
+        return respond(res, 200,'Done already registered');
       }
 
       // If user had used a shield today but now does /done, refund the shield!
@@ -252,7 +267,7 @@ export default async function handler(req, res) {
         `<i>Awesome job!</i> "Every small step takes you closer to fluency! Keep it up! 🚀"`;
 
       await sendTelegramMessage(msg.chat.id, successMsg);
-      return res.status(200).send('Done registered');
+      return respond(res, 200,'Done registered');
     }
 
     if (command === 'shield') {
@@ -262,7 +277,7 @@ export default async function handler(req, res) {
           `<i>Good decision!</i> "Use your shields wisely! 🛡️"`;
         
         await sendTelegramMessage(msg.chat.id, reply);
-        return res.status(200).send('Shield ignored - already done');
+        return respond(res, 200,'Shield ignored - already done');
       }
 
       if (user.lastShieldUsedDate === currentDateStr) {
@@ -271,7 +286,7 @@ export default async function handler(req, res) {
           `<i>Take it easy!</i> "Enjoy your day off! 🍕"`;
         
         await sendTelegramMessage(msg.chat.id, reply);
-        return res.status(200).send('Shield ignored - already used');
+        return respond(res, 200,'Shield ignored - already used');
       }
 
       if (user.shields > 0) {
@@ -287,14 +302,14 @@ export default async function handler(req, res) {
           `<i>Enjoy your break!</i> "Rest is part of the work. See you tomorrow! 💤"`;
         
         await sendTelegramMessage(msg.chat.id, reply);
-        return res.status(200).send('Shield activated');
+        return respond(res, 200,'Shield activated');
       } else {
         const reply = geminiResult && geminiResult.dynamicReply ? geminiResult.dynamicReply :
           `¡Uf, qué mala suerte, <b>${user.name}</b>! 😰 Ya no te quedan escudos disponibles para esta semana (recuerda que se resetean los lunes). ¡Vas a tener que meterle pata y hacer <code>/done</code> para no perder la racha!\n\n` +
           `<i>Don't give up!</i> "No pain, no gain! You've got this! 💥"`;
         
         await sendTelegramMessage(msg.chat.id, reply);
-        return res.status(200).send('Shield failed - no shields left');
+        return respond(res, 200,'Shield failed - no shields left');
       }
     }
 
@@ -345,11 +360,11 @@ export default async function handler(req, res) {
         `<i>Quote of the day:</i> "Success is the sum of small efforts, repeated day in and day out." 💪`;
 
       await sendTelegramMessage(msg.chat.id, report);
-      return res.status(200).send('Status command processed');
+      return respond(res, 200,'Status command processed');
     }
 
   } catch (err) {
     console.error('Fatal error in webhook handler:', err);
-    return res.status(500).json({ error: 'Internal Server Error', details: err.message });
+    return respond(res, 500, { error: 'Internal Server Error', details: err.message });
   }
 }

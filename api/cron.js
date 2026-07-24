@@ -2,12 +2,27 @@ import { getState, saveState } from './_db.js';
 import { sendTelegramMessage } from './_telegram.js';
 import { getLocalDateString, getPreviousDateString, getLocalDateParts, getDayOfWeek } from './_time.js';
 
+function respond(res, code, body) {
+  if (typeof res?.status === 'function') {
+    if (typeof body === 'object') return res.status(code).json(body);
+    return res.status(code).send(body);
+  }
+  if (res) {
+    res.statusCode = code;
+    if (typeof body === 'object') {
+      res.setHeader('Content-Type', 'application/json');
+      return res.end(JSON.stringify(body));
+    }
+    return res.end(String(body));
+  }
+}
+
 export default async function handler(req, res) {
   // Verify Cron authorization in production
-  const authHeader = req.headers.authorization;
+  const authHeader = req.headers ? req.headers.authorization : null;
   if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     if (process.env.MOCK_KV !== 'true') {
-      return res.status(401).json({ error: 'Unauthorized' });
+      return respond(res, 401, { error: 'Unauthorized' });
     }
   }
 
@@ -120,9 +135,9 @@ export default async function handler(req, res) {
       }
     }
 
-    return res.status(200).json({ success: true, evaluated: usersToProcess.map(u => u.key) });
+    return respond(res, 200, { success: true, evaluated: usersToProcess.map(u => u.key) });
   } catch (err) {
     console.error('Fatal error in cron handler:', err);
-    return res.status(500).json({ error: 'Internal Server Error', details: err.message });
+    return respond(res, 500, { error: 'Internal Server Error', details: err.message });
   }
 }
