@@ -8,7 +8,7 @@ The bot uses **Google Gemini AI** to interpret natural language messages, valida
 
 ## 🚀 Key Features
 
-* 🧠 **Natural Language Processing (Gemini 2.5 Flash-Lite):** Understands both explicit commands (`/done`, `/shield`, `/status`) and casual conversations in Spanish/English (e.g., *"today I learned I went to the store"*, *"I need a shield today"*).
+* 🧠 **Natural Language Processing (Gemini 3.5 Flash-Lite):** Understands both explicit commands (`/done`, `/shield`, `/status`) and casual conversations in Spanish/English (e.g., *"today I learned I went to the store"*, *"I need a shield today"*).
 * 📝 **Validation & Grammar Feedback:** Ensures submitted phrases have real learning substance (minimum 10+ characters) and provides quick grammatical tips or vocabulary suggestions.
 * 🔥 **Daily Streaks:** Tracks consecutive days of active practice.
 * 🛡️ **Weekly Break Shields:** Each user receives 2 shields per week (resetting every Monday) to take rest days without losing their streak.
@@ -22,7 +22,7 @@ The bot uses **Google Gemini AI** to interpret natural language messages, valida
 * **Runtime:** Node.js (ES Modules)
 * **Serverless Hosting:** Vercel Serverless Functions
 * **Database:** Vercel KV (`@vercel/kv` / Upstash Redis)
-* **Artificial Intelligence:** Google Gemini API (`gemini-2.5-flash-lite`, with fallback to `gemini-1.5-flash-lite` and token-optimized generation limits)
+* **Artificial Intelligence:** Google Gemini API (`gemini-3.5-flash-lite`, with fallback to `gemini-3.1-flash-lite` and token-optimized generation limits)
 * **Messaging Integration:** Telegram Bot API (Webhook)
 * **Cron Jobs:** Vercel Cron Jobs
 
