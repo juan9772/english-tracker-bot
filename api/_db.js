@@ -3,19 +3,31 @@ const KV_STATE_KEY = 'telegram_english_bot_state';
 // In-memory mock storage for local testing
 let mockState = null;
 let kvClient = null;
+let isIoRedis = false;
 
 async function getKvClient() {
   if (!kvClient) {
-    const url = (process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL || '').trim();
-    const token = (process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN || '').trim();
-    
-    if (!url || !token) {
-      console.warn('Redis REST URL or Token is missing in environment variables. Falling back to in-memory state.');
+    const redisUrl = (process.env.REDIS_URL || process.env.KV_URL || '').trim();
+    const restUrl = (process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL || '').trim();
+    const restToken = (process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN || '').trim();
+
+    if (redisUrl && (redisUrl.startsWith('redis://') || redisUrl.startsWith('rediss://'))) {
+      const { default: Redis } = await import('ioredis');
+      kvClient = new Redis(redisUrl, {
+        connectTimeout: 5000,
+        maxRetriesPerRequest: 3,
+        lazyConnect: true
+      });
+      await kvClient.connect();
+      isIoRedis = true;
+    } else if (restUrl && restToken && !restUrl.includes('...')) {
+      const { Redis } = await import('@upstash/redis');
+      kvClient = new Redis({ url: restUrl, token: restToken });
+      isIoRedis = false;
+    } else {
+      console.warn('Redis connection parameters missing in environment variables. Falling back to in-memory state.');
       return null;
     }
-    
-    const { Redis } = await import('@upstash/redis');
-    kvClient = new Redis({ url, token });
   }
   return kvClient;
 }
@@ -40,7 +52,7 @@ export async function getState() {
     const state = await kv.get(KV_STATE_KEY);
     if (!state) {
       const initial = getInitialState();
-      await kv.set(KV_STATE_KEY, initial);
+      await saveState(initial);
       return initial;
     }
     return typeof state === 'string' ? JSON.parse(state) : state;
@@ -66,7 +78,11 @@ export async function saveState(state) {
       mockState = JSON.parse(JSON.stringify(state));
       return;
     }
-    await kv.set(KV_STATE_KEY, state);
+    if (isIoRedis) {
+      await kv.set(KV_STATE_KEY, JSON.stringify(state));
+    } else {
+      await kv.set(KV_STATE_KEY, state);
+    }
   } catch (err) {
     console.error('Error saving state to Redis KV:', err);
     mockState = JSON.parse(JSON.stringify(state));
