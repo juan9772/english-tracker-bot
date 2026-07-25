@@ -11,7 +11,7 @@ export async function callGemini(user, text, state, isUserBActive) {
   const apiKey = (process.env.GEMINI_API_KEY || '').trim();
   if (!apiKey) return null;
 
-  const defaultModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+  const defaultModels = ['gemini-2.5-flash-lite', 'gemini-1.5-flash-lite', 'gemini-2.0-flash-lite', 'gemini-2.5-flash', 'gemini-1.5-flash'];
   const envModel = (process.env.GEMINI_MODEL || '').trim();
   const modelsToTry = [...new Set([envModel, ...defaultModels].filter(Boolean))];
 
@@ -20,23 +20,17 @@ export async function callGemini(user, text, state, isUserBActive) {
   const isAlreadyShielded = user.lastShieldUsedDate === currentDateStr;
 
   const systemInstructionText = `
-Eres el cerebro de un bot de Telegram inteligente e informal llamado "English Tracker Bot". Tu objetivo es registrar la práctica de inglés de dos estudiantes o compañeros de estudio.
-
-Tu tarea es analizar el mensaje del usuario y responder con un JSON estructurado que contenga:
-1. "intent": Clasificación de la intención del mensaje. Valores posibles:
-   - "start": Saludos iniciales, registro, bienvenida o preguntas de cómo usar el bot.
-   - "shield": Solicitud para usar un escudo protector hoy (ej. "escudo", "ponme escudo", "hoy no puedo estudiar", "necesito descanso").
-   - "status": Consulta de racha, escudos o estado (ej. "cómo voy?", "status", "ver racha", "estado").
-   - "done": Envío de una frase en inglés para registrar la práctica.
-   - "chat": Conversación casual, agradecimientos ("gracias", "ok", "jaja"), o mensajes breves que no son comandos ni frases.
-2. "englishPhrase": (Solo para "done") La frase en inglés extraída y limpia de prefijos en español (ej. si dice "hoy aprendí: Today is sunny", extraer "Today is sunny").
-3. "isEnglishValid": (Solo para "done") true si la frase está en inglés, tiene 10 o más caracteres de texto en inglés y tiene coherencia para ser una práctica. De lo contrario, false.
-4. "dynamicReply": Una respuesta en español personalizada para el usuario (usando un tono informal, alegre y motivador).
-   - Si es "start": bienvenida y explicación alegre de cómo usar el bot (sin usar barras "/" si no quieren).
-   - Si es "shield": confirmación de que descanse tranquilo (menciona si ya lo había activado o si ya hizo la tarea hoy basándote en los datos del usuario).
-   - Si es "done" y es válida: felicitación alegre y un tip gramatical muy breve o sugerencia de vocabulario sobre su frase en inglés.
-   - Si es "done" pero no es válida: advertencia graciosa y educativa de por qué no califica (muy corta, español o inconexa) y sugerencias.
-   - Si es "chat": respuesta corta y simpática. Si el mensaje es una conversación grupal casual e irrelevante donde no se dirigen al bot ni requiere respuesta, pon "dynamicReply" como un string vacío "".
+Eres "English Tracker Bot". Registras la práctica diaria de inglés.
+Analiza el mensaje y responde en JSON:
+1. "intent": "start" (bienvenida/ayuda), "shield" (escudo descanso), "status" (consulta racha/estado), "done" (frase inglés), "chat" (conversación casual).
+2. "englishPhrase": (solo para "done") Frase limpia en inglés sin prefijos en español.
+3. "isEnglishValid": (solo para "done") true si está en inglés, tiene >=10 caracteres y coherencia. Si no, false.
+4. "dynamicReply": Respuesta en español breve, informal y motivadora.
+   - "start": bienvenida y cómo usar el bot.
+   - "shield": confirmación breve según estado del usuario.
+   - "done" (válida): felicitación muy corta + tip gramatical/vocabulario breve.
+   - "done" (inválida): advertencia graciosa muy corta de por qué no califica.
+   - "chat": respuesta corta. Si es charla grupal no dirigida al bot, usa "".
 `;
 
   const promptContent = `
@@ -65,6 +59,7 @@ MENSAJE DEL USUARIO:
             contents: [{ parts: [{ text: promptContent }] }],
             generationConfig: {
               responseMimeType: 'application/json',
+              maxOutputTokens: 250,
               responseSchema: {
                 type: 'OBJECT',
                 properties: {
