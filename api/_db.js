@@ -65,6 +65,7 @@ export async function getState() {
 
 /**
  * Persists the updated state back to Vercel KV or the mock state.
+ * Implements strict safeguards to prevent accidental wiping of user IDs, usernames, streaks, and chatId.
  */
 export async function saveState(state) {
   if (process.env.MOCK_KV === 'true') {
@@ -78,6 +79,41 @@ export async function saveState(state) {
       mockState = JSON.parse(JSON.stringify(state));
       return;
     }
+
+    // Protection Safeguard: Merge with existing Redis state to prevent accidental wiping of user IDs, usernames, or streaks
+    try {
+      const existingRaw = await kv.get(KV_STATE_KEY);
+      if (existingRaw) {
+        const existing = typeof existingRaw === 'string' ? JSON.parse(existingRaw) : existingRaw;
+        
+        // Preserve chatId if present in Redis
+        if (!state.chatId && existing.chatId) {
+          state.chatId = existing.chatId;
+        }
+
+        if (existing.users) {
+          // Preserve User A ID, Username, and Streak if higher
+          if (existing.users.userA && state.users?.userA) {
+            if (!state.users.userA.id && existing.users.userA.id) state.users.userA.id = existing.users.userA.id;
+            if (!state.users.userA.username && existing.users.userA.username) state.users.userA.username = existing.users.userA.username;
+            if ((state.users.userA.streak || 0) < (existing.users.userA.streak || 0) && !state.forceReset) {
+              state.users.userA.streak = existing.users.userA.streak;
+            }
+          }
+          // Preserve User B ID, Username, and Streak if higher
+          if (existing.users.userB && state.users?.userB) {
+            if (!state.users.userB.id && existing.users.userB.id) state.users.userB.id = existing.users.userB.id;
+            if (!state.users.userB.username && existing.users.userB.username) state.users.userB.username = existing.users.userB.username;
+            if ((state.users.userB.streak || 0) < (existing.users.userB.streak || 0) && !state.forceReset) {
+              state.users.userB.streak = existing.users.userB.streak;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Non-fatal error reading current state for protection merge:', e);
+    }
+
     if (isIoRedis) {
       await kv.set(KV_STATE_KEY, JSON.stringify(state));
     } else {
