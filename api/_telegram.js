@@ -30,6 +30,21 @@ export async function sendTelegramMessage(chatId, text) {
     if (!response.ok) {
       const errorMsg = await response.text();
       console.error(`Telegram API error (status ${response.status}):`, errorMsg);
+
+      // Fallback: If Telegram HTML parsing failed (400 Bad Request), retry as plain text without parse_mode
+      if (response.status === 400) {
+        console.warn('Retrying Telegram message without HTML parse_mode fallback...');
+        const cleanText = text.replace(/<[^>]*>/g, '');
+        const retryResponse = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: chatId,
+            text: cleanText
+          })
+        });
+        return retryResponse.ok;
+      }
       return false;
     }
     return true;

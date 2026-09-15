@@ -33,6 +33,17 @@ export function formatTelegramHtml(text) {
     return `<blockquote>${cleanContent}</blockquote>\n`;
   });
 
+  // Protect valid Telegram HTML tags, escape remaining < and > to prevent Telegram 400 parsing errors
+  const validTagRegex = /<\/?(b|strong|i|em|code|pre|blockquote|s|strike|u|a)(\s+href="[^"]*")?\s*\/?>/gi;
+  const tags = [];
+  html = html.replace(validTagRegex, (tag) => {
+    tags.push(tag);
+    return `___TAG_${tags.length - 1}___`;
+  });
+
+  html = html.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  html = html.replace(/___TAG_(\d+)___/g, (_, index) => tags[parseInt(index, 10)]);
+
   return html.trim();
 }
 
@@ -56,7 +67,7 @@ Eres "English Tracker Bot", un tutor de inglés nativo, empático, entusiasta y 
 Registras la práctica diaria de inglés del usuario y analizas su texto de forma profunda.
 
 Analiza el mensaje del usuario y responde estrictamente en JSON con los siguientes campos:
-1. "intent": "start" (bienvenida/ayuda), "shield" (escudo descanso), "status" (consulta racha/estado), "done" (frase o texto en inglés para check-in), "chat" (conversación casual).
+1. "intent": "start" (bienvenida/ayuda), "shield" (escudo descanso), "status" (consulta racha/estado), "done" (frase o texto en inglés para check-in), "chat" (conversación casual). Si el mensaje contiene una frase o texto en inglés (>=10 caracteres), CLASIFÍCALO SIEMPRE COMO "done" para registrar su práctica.
 2. "englishPhrase": (solo para "done") Frase limpia o texto en inglés sin prefijos en español ni etiquetas de comando.
 3. "isEnglishValid": (solo para "done") true si está en inglés, tiene >=10 caracteres y cierta coherencia. Si no, false.
 4. "dynamicReply": Respuesta detallada en español (estilo amigable, rioplatense/cálido).
