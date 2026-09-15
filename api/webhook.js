@@ -66,17 +66,30 @@ export default async function handler(req, res) {
     const user = state.users[userKey];
 
     // Dynamically update user details in storage
-    user.id = msg.from.id.toString();
-    user.username = msg.from.username || null;
-    
-    // Set custom display name if it's the default placeholder
+    let detailsChanged = false;
+    if (user.id !== msg.from.id.toString()) {
+      user.id = msg.from.id.toString();
+      detailsChanged = true;
+    }
+    if (msg.from.username && user.username !== msg.from.username) {
+      user.username = msg.from.username;
+      detailsChanged = true;
+    }
     if (user.name === 'Usuario A' || user.name === 'Usuario B' || !user.name) {
       user.name = msg.from.first_name + (msg.from.last_name ? ` ${msg.from.last_name}` : '');
+      detailsChanged = true;
     }
 
-    // Save group chat ID for cron announcements
-    if (msg.chat && (msg.chat.type === 'group' || msg.chat.type === 'supergroup')) {
-      state.chatId = msg.chat.id;
+    // Save group or chat ID for cron and announcements
+    if (msg.chat && msg.chat.id) {
+      if (state.chatId !== msg.chat.id) {
+        state.chatId = msg.chat.id;
+        detailsChanged = true;
+      }
+    }
+
+    if (detailsChanged) {
+      await saveState(state);
     }
 
     // Call Gemini API with retries and fallback models
