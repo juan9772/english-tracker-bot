@@ -79,7 +79,14 @@ globalThis.fetch = async (url, options) => {
       if (alreadyDone) {
         dynamicReply = '¡Che! Ya registré tu práctica de hoy. ¡No hace falta que lo hagas de nuevo! 🌟';
       } else if (isEnglishValid) {
-        dynamicReply = `¡Espectacular! He registrado tu frase: "${phrase}". (Minitip gramatical: ¡sigue así!).`;
+        dynamicReply = `Tu idea se entiende muy bien. El principal problema no es el vocabulario, sino <b>cómo conectás las ideas y algunas estructuras gramaticales</b>. Te propongo una versión natural:\n\n` +
+          `<blockquote>I have been thinking about how I can decide when I should think and when I should just live. Today, I heard someone say that the highest level of intelligence is learning when it is necessary to use your intelligence...</blockquote>\n\n` +
+          `🧠 <b>Qué mejoraría de tu versión</b>\n\n` +
+          `<b>1. "when I should think and when I should live"</b>\n` +
+          `Está bien gramaticalmente. Agregué <b>"just"</b> porque suena más natural en este contexto.\n\n` +
+          `<b>2. "I listened to someone say" → "I heard someone say"</b>\n` +
+          `<b>heard</b> es mucho más natural para escuchar a alguien decir algo.\n\n` +
+          `Tu inglés acá ya está entrando bastante en terreno B1/B2. ¡A seguir practicando! 🌱`;
       } else {
         dynamicReply = '¡Epa! La frase de hoy debe tener al menos 10 caracteres para contar como práctica real. ¡No me hagas trampa! 😉';
       }

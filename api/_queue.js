@@ -5,6 +5,38 @@ import { getLocalDateString } from './_time.js';
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
+ * Converts Markdown formatting (headers, bold, italics, blockquotes, code)
+ * into Telegram-compatible HTML tags (<b>, <i>, <code>, <blockquote>, etc.)
+ */
+export function formatTelegramHtml(text) {
+  if (!text) return '';
+
+  let html = text;
+
+  // Convert headers (### Header, ## Header, # Header) to <b>Header</b>
+  html = html.replace(/^#{1,6}\s+(.+)$/gm, '<b>$1</b>');
+
+  // Convert bold: **text** or __text__ -> <b>text</b>
+  html = html.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+  html = html.replace(/__(.*?)__/g, '<b>$1</b>');
+
+  // Convert italics: *text* -> <i>text</i> (if not part of **)
+  html = html.replace(/(?<!\*)\*([^\*\s][^\*]*?)\*(?!\*)/g, '<i>$1</i>');
+
+  // Convert blockquotes: > line1\n> line2 -> <blockquote>line1\nline2</blockquote>
+  html = html.replace(/(?:^[ \t]*>[ \t]*[^\n]*(?:\n|$))+/gm, (match) => {
+    const cleanContent = match
+      .split('\n')
+      .map(line => line.replace(/^[ \t]*>[ \t]?/, ''))
+      .join('\n')
+      .trim();
+    return `<blockquote>${cleanContent}</blockquote>\n`;
+  });
+
+  return html.trim();
+}
+
+/**
  * Calls Gemini API with exponential backoff retries and fallback models.
  */
 export async function callGemini(user, text, state, isUserBActive) {
@@ -20,17 +52,38 @@ export async function callGemini(user, text, state, isUserBActive) {
   const isAlreadyShielded = user.lastShieldUsedDate === currentDateStr;
 
   const systemInstructionText = `
-Eres "English Tracker Bot". Registras la práctica diaria de inglés.
-Analiza el mensaje y responde en JSON:
-1. "intent": "start" (bienvenida/ayuda), "shield" (escudo descanso), "status" (consulta racha/estado), "done" (frase inglés), "chat" (conversación casual).
-2. "englishPhrase": (solo para "done") Frase limpia en inglés sin prefijos en español.
-3. "isEnglishValid": (solo para "done") true si está en inglés, tiene >=10 caracteres y coherencia. Si no, false.
-4. "dynamicReply": Respuesta en español breve, informal y motivadora.
-   - "start": bienvenida y cómo usar el bot.
-   - "shield": confirmación breve según estado del usuario.
-   - "done" (válida): felicitación muy corta + tip gramatical/vocabulario breve.
-   - "done" (inválida): advertencia graciosa muy corta de por qué no califica.
-   - "chat": respuesta corta. Si es charla grupal no dirigida al bot, usa "".
+Eres "English Tracker Bot", un tutor de inglés nativo, empático, entusiasta y pedagógico en Telegram.
+Registras la práctica diaria de inglés del usuario y analizas su texto de forma profunda.
+
+Analiza el mensaje del usuario y responde estrictamente en JSON con los siguientes campos:
+1. "intent": "start" (bienvenida/ayuda), "shield" (escudo descanso), "status" (consulta racha/estado), "done" (frase o texto en inglés para check-in), "chat" (conversación casual).
+2. "englishPhrase": (solo para "done") Frase limpia o texto en inglés sin prefijos en español ni etiquetas de comando.
+3. "isEnglishValid": (solo para "done") true si está en inglés, tiene >=10 caracteres y cierta coherencia. Si no, false.
+4. "dynamicReply": Respuesta detallada en español (estilo amigable, rioplatense/cálido).
+
+REGLAS PARA "dynamicReply" CUANDO "intent" ES "done" Y "isEnglishValid" ES TRUE:
+Debes proporcionar una corrección de ALTA CALIDAD, PROFUNDA, ESTRUCTURADA Y PEDAGÓGICA en español, con la siguiente estructura exacta (usando formato HTML compatible con Telegram: <b>negrita</b>, <i>cursiva</i>, <code>código</code>, <blockquote>bloque de cita</blockquote>):
+
+1. **Feedback Inicial y Versión Reescribida Natural**:
+   - Da un comentario cálido y motivador sobre la idea que expresó el usuario.
+   - Presenta una versión completamente natural en inglés que mantenga la voz e intención del usuario. Coloca esta versión dentro de un bloque <blockquote>...</blockquote>.
+
+2. **Sección Detallada de Mejoras**:
+   - Encabezado: 🧠 <b>Qué mejoraría de tu versión</b>
+   - Lista numerada de puntos específicos (1, 2, 3...):
+     * Para cada punto, indica la frase original vs. la sugerencia en negrita o código.
+     * Explica con claridad y empatía el **porqué** gramatical, de vocabulario o de fluidez/naturalidad (ej. diferencias finas como "listen" vs "hear", uso/omisión de artículos como "the rest of the time", orden de palabras como "should just live", colocaciones naturales como "highest level", verbos precisos como "overthink").
+     * Si aplica, agrega alternativas interesantes o frases útiles que el usuario pueda incorporar a su repertorio.
+
+3. **Valoración de Nivel y Cierre Motivador**:
+   - Comenta sobre el nivel de complejidad del texto (ej. "Tu inglés acá ya está entrando en terreno B1/B2 porque estás expresando ideas abstractas... 🌱").
+   - Cierra con una frase corta de aliento.
+
+REGLAS PARA OTROS INTENTS EN "dynamicReply":
+- "start": bienvenida completa y explicación de uso del bot.
+- "shield": confirmación amigable según estado de escudos del usuario.
+- "done" (inválida): advertencia humorística y empática explicando por qué no califica (menos de 10 caracteres o no es inglés).
+- "chat": respuesta corta y natural en español.
 `;
 
   const promptContent = `
@@ -59,7 +112,7 @@ MENSAJE DEL USUARIO:
             contents: [{ parts: [{ text: promptContent }] }],
             generationConfig: {
               responseMimeType: 'application/json',
-              maxOutputTokens: 250,
+              maxOutputTokens: 3000,
               responseSchema: {
                 type: 'OBJECT',
                 properties: {
@@ -119,14 +172,14 @@ export async function executeParsedCommand(user, userKey, command, args, geminiR
 
   if (command === 'chat') {
     if (geminiResult && geminiResult.dynamicReply) {
-      await sendTelegramMessage(chatId, geminiResult.dynamicReply);
+      await sendTelegramMessage(chatId, formatTelegramHtml(geminiResult.dynamicReply));
     }
     return 'Casual chat processed';
   }
 
   if (command === 'start') {
     await saveState(state);
-    const welcome = geminiResult && geminiResult.dynamicReply ? geminiResult.dynamicReply :
+    const welcome = geminiResult && geminiResult.dynamicReply ? formatTelegramHtml(geminiResult.dynamicReply) :
       `¡Hola, <b>${user.name}</b>! 👋 Bienvenidos a nuestro rincón de constancia en inglés. 🇬🇧 Aquí vamos a asegurarnos de que practiques todos los días. ¡A no aflojar!\n\n` +
       `Tus comandos disponibles son:\n` +
       `👉 <b><code>/done [frase en inglés]</code></b> - Hace tu check-in del día (mínimo 10 caracteres).\n` +
@@ -144,7 +197,7 @@ export async function executeParsedCommand(user, userKey, command, args, geminiR
     if (!isEnglishValid) {
       const exampleText = geminiResult && geminiResult.dynamicReply ?
         `¡Epa, <b>${user.name}</b>! 🚨\n\n` +
-        `<i>${geminiResult.dynamicReply}</i>` :
+        `${formatTelegramHtml(geminiResult.dynamicReply)}` :
         `¡Epa, <b>${user.name}</b>! 🚨 La frase de hoy debe tener al menos 10 caracteres para contar como práctica real. ¡No me hagas trampa! 😉\n\n` +
         `Intenta escribir algo que hayas aprendido, leído o escuchado hoy. Por ejemplo:\n` +
         `👉 <code>/done Today I learned the difference between "make" and "do".</code>\n` +
@@ -156,7 +209,7 @@ export async function executeParsedCommand(user, userKey, command, args, geminiR
     }
 
     if (user.lastCheckIn === currentDateStr) {
-      const doubleCheckInMsg = geminiResult && geminiResult.dynamicReply ? geminiResult.dynamicReply :
+      const doubleCheckInMsg = geminiResult && geminiResult.dynamicReply ? formatTelegramHtml(geminiResult.dynamicReply) :
         `¡Che, <b>${user.name}</b>! Ya registré tu práctica de hoy. ¡No hace falta que lo hagas de nuevo! 🌟\n\n` +
         `<i>Well done!</i> "Keep shining and enjoy your rest! ✨"`;
       
@@ -176,10 +229,11 @@ export async function executeParsedCommand(user, userKey, command, args, geminiR
     user.streak += 1;
     await saveState(state);
 
+    const formattedReply = geminiResult?.dynamicReply ? formatTelegramHtml(geminiResult.dynamicReply) : '';
+
     const successMsg = geminiResult && geminiResult.dynamicReply ?
-      `¡Espectacular, <b>${user.name}</b>! 🎉 He registrado tu frase de hoy:\n` +
-      `<i>"${args}"</i>\n\n` +
-      `<i>${geminiResult.dynamicReply}</i>\n\n` +
+      `¡Espectacular, <b>${user.name}</b>! 🎉 He registrado tu práctica de hoy:\n\n` +
+      `${formattedReply}\n\n` +
       `${shieldRefundText}` +
       `Tu racha actual ahora es de 🔥 <b>${user.streak} días</b>.` :
       `¡Espectacular, <b>${user.name}</b>! 🎉 He registrado tu frase de hoy:\n` +
