@@ -89,6 +89,13 @@ const mathExpr = 'If x < 5 and y > 10, then OK';
 const formattedMath = formatTelegramHtml(mathExpr);
 assert.strictEqual(formattedMath, 'If x &lt; 5 and y &gt; 10, then OK');
 
+// Conversion of <br>, <br/>, &lt;br&gt; to newlines
+const brSample = '🧠 Qué mejoraría de tu versión<br><br>1. "first"<br/>2. "second"&lt;br&gt;3. "third"';
+const formattedBr = formatTelegramHtml(brSample);
+assert(!formattedBr.includes('<br>'), 'Does not contain literal <br>');
+assert(!formattedBr.includes('&lt;br&gt;'), 'Does not contain encoded &lt;br&gt;');
+assert(formattedBr.includes('🧠 Qué mejoraría de tu versión\n\n1. "first"\n2. "second"\n3. "third"'), 'Newlines properly inserted');
+
 console.log('✅ Markdown and entity formatting passed');
 
 // -------------------------------------------------------------

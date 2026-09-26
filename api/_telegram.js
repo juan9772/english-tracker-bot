@@ -52,12 +52,39 @@ const ALLOWED_TAGS = new Set([
 ]);
 
 /**
+ * Normalizes unsupported HTML structural tags (<br>, <p>, <li>, <div>, etc.)
+ * and entity-encoded tags (&lt;br&gt;) into clean newlines and bullets.
+ */
+export function normalizeHtmlStructure(text) {
+  if (!text) return '';
+
+  return String(text)
+    // Replace <br>, <br/>, <br />, &lt;br&gt;, &lt;br/&gt;, etc. with newlines
+    .replace(/(?:<br\s*\/?>|&lt;br\s*\/?&gt;)/gi, '\n')
+    // Replace <p>, </p>, &lt;p&gt;, &lt;/p&gt; with newlines
+    .replace(/(?:<p\b[^>]*>|&lt;p\b[^&]*&gt;)/gi, '\n\n')
+    .replace(/(?:<\/p>|&lt;\/p&gt;)/gi, '\n')
+    // Replace <li>, </li>, &lt;li&gt;, &lt;/li&gt; with bullet points
+    .replace(/(?:<li>|&lt;li&gt;)/gi, '\n• ')
+    .replace(/(?:<\/li>|&lt;\/li&gt;)/gi, '')
+    // Replace headers <h1..6> with bold
+    .replace(/(?:<h[1-6]\b[^>]*>|&lt;h[1-6]\b[^&]*&gt;)/gi, '\n\n<b>')
+    .replace(/(?:<\/h[1-6]>|&lt;\/h[1-6]&gt;)/gi, '</b>\n')
+    // Replace &nbsp; with standard space
+    .replace(/&nbsp;/gi, ' ')
+    // Replace <div>, <ul>, <ol>, etc. with newlines
+    .replace(/(?:<\/?(div|ul|ol|table|tr|td|th|tbody|thead)\b[^>]*>|&lt;\/?(div|ul|ol|table|tr|td|th|tbody|thead)\b[^&]*&gt;)/gi, '\n');
+}
+
+/**
  * Normalizes and balances Telegram-compatible HTML tags.
  * Ensures that every opened tag is closed in proper nested order,
  * unsupported HTML tags are stripped or converted, and rogue closing tags are discarded.
  */
 export function balanceHtmlTags(html) {
   if (!html) return '';
+
+  html = normalizeHtmlStructure(html);
 
   const tagRegex = /<(\/)?([a-zA-Z0-9_-]+)([\s\S]*?)>/g;
   let lastIndex = 0;
@@ -165,6 +192,9 @@ export function formatTelegramHtml(text) {
 
   let html = text.replace(/\r\n/g, '\n');
 
+  // Convert unsupported structural HTML tags (<br>, <p>, <li>, etc.) before anything else
+  html = normalizeHtmlStructure(html);
+
   // 1. Convert code blocks: ```lang?\ncode\n``` -> <pre><code>code</code></pre>
   html = html.replace(/```(?:[a-zA-Z0-9_-]+)?\n([\s\S]*?)```/g, (_, code) => {
     return `<pre><code>${escapeHtml(code)}</code></pre>`;
@@ -205,7 +235,16 @@ export function formatTelegramHtml(text) {
   // 9. Convert bullet lists at start of lines: * item or - item -> • item
   html = html.replace(/^[ \t]*[-*][ \t]+(.+)$/gm, '• $1');
 
-  // 10. Protect valid Telegram HTML tags, then escape remaining raw &, <, >
+  // 10. Strip any remaining unsupported HTML tags (e.g. <font...>, <section>, <div>, etc.)
+  html = html.replace(/<(\/)?([a-zA-Z][a-zA-Z0-9_-]*)([^>]*)>/g, (fullMatch, isClosing, rawTagName) => {
+    const tagName = rawTagName.toLowerCase();
+    if (ALLOWED_TAGS.has(tagName)) {
+      return fullMatch;
+    }
+    return '';
+  });
+
+  // 11. Protect valid Telegram HTML tags, then escape remaining raw &, <, >
   const validTagRegex = /<\/?(b|strong|i|em|code|pre|blockquote|s|strike|del|u|ins|tg-spoiler|a)(\s+[^>]*)?\/?>/gi;
   const tags = [];
   html = html.replace(validTagRegex, (tag) => {
@@ -222,8 +261,13 @@ export function formatTelegramHtml(text) {
   // Restore protected tags
   html = html.replace(/___TG_TAG_(\d+)___/g, (_, index) => tags[parseInt(index, 10)]);
 
-  // 11. Balance all tags to ensure strict well-formed Telegram HTML
-  return balanceHtmlTags(html).trim();
+  // 12. Balance all tags to ensure strict well-formed Telegram HTML
+  html = balanceHtmlTags(html);
+
+  // 13. Normalize excessive consecutive newlines (max 2)
+  html = html.replace(/\n{3,}/g, '\n\n');
+
+  return html.trim();
 }
 
 /**
