@@ -1,5 +1,5 @@
 import { getState, saveState, findUserKey } from './_db.js';
-import { sendTelegramMessage } from './_telegram.js';
+import { sendTelegramMessage, escapeHtml } from './_telegram.js';
 import { getLocalDateString } from './_time.js';
 import { callGemini, executeParsedCommand, processQueue } from './_queue.js';
 
@@ -55,7 +55,7 @@ export default async function handler(req, res) {
     const userKey = findUserKey(state, msg);
 
     if (!userKey) {
-      const replyMsg = `Hum... ¡Hola <b>${msg.from.first_name}</b>! 🧐 No reconozco tu usuario de Telegram (<code>@${msg.from.username || 'sin_usuario'}</code>) en este grupo de estudio.\n\n` +
+      const replyMsg = `Hum... ¡Hola <b>${escapeHtml(msg.from.first_name)}</b>! 🧐 No reconozco tu usuario de Telegram (<code>@${escapeHtml(msg.from.username || 'sin_usuario')}</code>) en este grupo de estudio.\n\n` +
         `Pídele al administrador que configure tu usuario en las variables de entorno (<code>USER_A_USERNAME</code> o <code>USER_B_USERNAME</code>).\n\n` +
         `<i>English note:</i> "Only registered members can join the challenge! Let's get configured first!" ⚙️`;
       

@@ -1,5 +1,5 @@
 import { getState, saveState } from './_db.js';
-import { sendTelegramMessage } from './_telegram.js';
+import { sendTelegramMessage, escapeHtml } from './_telegram.js';
 import { getLocalDateString, getPreviousDateString, getLocalDateParts, getDayOfWeek } from './_time.js';
 import { processQueue } from './_queue.js';
 
@@ -54,6 +54,7 @@ export default async function handler(req, res) {
       const previousDateStr = getPreviousDateString(currentDateStr);
       const parts = getLocalDateParts(now, user.timezone);
       const localDayOfWeek = getDayOfWeek(currentDateStr); // 1 = Monday
+      const safeUserName = escapeHtml(user.name);
 
       // 1. Check for Monday weekly shield reset
       if (localDayOfWeek === 1 && user.lastShieldResetDate !== currentDateStr) {
@@ -63,7 +64,7 @@ export default async function handler(req, res) {
         
         messagesToSend.push({
           chatId: announcementChatId,
-          text: `✨ <b>¡Comienza una nueva semana!</b> Los escudos de <b>${user.name}</b> se han restablecido a <b>2</b>. 🛡️ ¡Úsalos con sabiduría!\n\n<i>English tip:</i> "A fresh start is a clean slate. Make this week count!" 🚀`
+          text: `✨ <b>¡Comienza una nueva semana!</b> Los escudos de <b>${safeUserName}</b> se han restablecido a <b>2</b>. 🛡️ ¡Úsalos con sabiduría!\n\n<i>English tip:</i> "A fresh start is a clean slate. Make this week count!" 🚀`
         });
       }
 
@@ -96,7 +97,7 @@ export default async function handler(req, res) {
 
             messagesToSend.push({
               chatId: announcementChatId,
-              text: `⚠️ <b>${user.name}</b> no registró su frase de inglés ayer... ¡Pero se ha salvado usando un escudo automático! 🛡️ Le quedan <b>${user.shields} escudos</b> para esta semana.\n\n<i>English reminder:</i> "Don't let the streak break! Try to practice today!" ✍️`
+              text: `⚠️ <b>${safeUserName}</b> no registró su frase de inglés ayer... ¡Pero se ha salvado usando un escudo automático! 🛡️ Le quedan <b>${user.shields} escudos</b> para esta semana.\n\n<i>English reminder:</i> "Don't let the streak break! Try to practice today!" ✍️`
             });
           } else {
             // No shields left. Streak resets to 0!
@@ -117,7 +118,7 @@ export default async function handler(req, res) {
             messagesToSend.push({
               chatId: announcementChatId,
               text: `🚨💥 <b>¡LA CONSTANCIA SE HA ROTO!</b> 💥🚨\n\n` +
-                `<b>${user.name}</b> no completó su práctica de inglés ayer y no le quedaban escudos. 😱\n\n` +
+                `<b>${safeUserName}</b> no completó su práctica de inglés ayer y no le quedaban escudos. 😱\n\n` +
                 `Su racha de <b>${oldStreak} días</b> se ha desplomado a <b>0</b>. 😭\n\n` +
                 `⚡ <b>PENALIZACIÓN:</b> Deberá <b>${randomPenalty}</b>\n\n` +
                 `<i>English lesson:</i> "Consistency is hard, but excuses don't build habits. Pay the price and start again!" 💀`
