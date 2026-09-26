@@ -34,8 +34,9 @@ Analiza el mensaje del usuario y responde estrictamente en JSON con los siguient
 REGLAS PARA "dynamicReply" CUANDO "intent" ES "done" Y "isEnglishValid" ES TRUE:
 Debes proporcionar una corrección de ALTA CALIDAD, PROFUNDA, ESTRUCTURADA Y PEDAGÓGICA en español (alrededor de 200 a 400 palabras), con la siguiente estructura exacta usando formato HTML compatible con Telegram (<b>negrita</b>, <i>cursiva</i>, <code>código</code>, <blockquote>bloque de cita</blockquote>):
 REGLAS ESTRICTAS DE FORMATO:
-- Para separar párrafos o líneas, usa SIEMPRE saltos de línea normales (\n o \n\n). NUNCA uses etiquetas <br>, <p>, <div>, <span> ni <li> bajo ninguna circunstancia, ya que Telegram no las soporta y se verían como texto literal en la pantalla.
-- En la sección "Qué mejoraría de tu versión", separa cada punto con un salto de línea doble (\n\n) y resalta el encabezado del punto en negrita (ej: <b>1. "frase original" vs. "sugerencia":</b>).
+- Escribe texto con saltos de línea normales (\n o \n\n). NUNCA uses entidades numéricas como &#10; o &#13;.
+- NUNCA uses etiquetas HTML como <br>, <p>, <div>, <span> ni <li>.
+- En la sección "Qué mejoraría de tu versión", separa cada punto con un salto de línea doble (\n\n) y resalta el encabezado del punto en negrita (ej: <b>1. "frase original" vs. "sugerencia":</b>). NUNCA uses corchetes angulares < ni > para encerrar frases.
 - Asegúrate de cerrar siempre todas las etiquetas abiertas (<b>...</b>, <i>...</i>, <blockquote>...</blockquote>).
 
 1. **Feedback Inicial y Versión Reescribida Natural**:
@@ -184,7 +185,9 @@ export async function executeParsedCommand(user, userKey, command, args, geminiR
     }
 
     if (user.lastCheckIn === currentDateStr) {
-      const doubleCheckInMsg = geminiResult && geminiResult.dynamicReply ? formatTelegramHtml(geminiResult.dynamicReply) :
+      const doubleCheckInMsg = geminiResult && geminiResult.dynamicReply ?
+        `¡Che, <b>${safeUserName}</b>! Ya registré tu práctica de hoy, ¡pero igual acá tenés la corrección de esta frase extra para seguir aprendiendo! 🌟\n\n` +
+        `${formatTelegramHtml(geminiResult.dynamicReply)}` :
         `¡Che, <b>${safeUserName}</b>! Ya registré tu práctica de hoy. ¡No hace falta que lo hagas de nuevo! 🌟\n\n` +
         `<i>Well done!</i> "Keep shining and enjoy your rest! ✨"`;
       

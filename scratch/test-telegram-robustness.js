@@ -96,6 +96,13 @@ assert(!formattedBr.includes('<br>'), 'Does not contain literal <br>');
 assert(!formattedBr.includes('&lt;br&gt;'), 'Does not contain encoded &lt;br&gt;');
 assert(formattedBr.includes('🧠 Qué mejoraría de tu versión\n\n1. "first"\n2. "second"\n3. "third"'), 'Newlines properly inserted');
 
+// Decoding of &#10; and preservation of text with angle brackets like <forgot to practice>
+const entitySample = 'con mucha más onda.&#10;&#10;<blockquote>Shoot, I lost my streak...</blockquote>&#10;&#10;🧠 Qué mejoraría de tu versión&#10;&#10;1. <forgot to practice before> vs <forgot to practice beforehand>: explicación completa.';
+const formattedEntity = formatTelegramHtml(entitySample);
+assert(!formattedEntity.includes('&#10;'), 'Does not contain literal &#10;');
+assert(!formattedEntity.includes('&amp;#10;'), 'Does not contain escaped &amp;#10;');
+assert(formattedEntity.includes('con mucha más onda.\n\n<blockquote>Shoot, I lost my streak...</blockquote>\n\n🧠 Qué mejoraría de tu versión\n\n1. &lt;forgot to practice before&gt; vs &lt;forgot to practice beforehand&gt;: explicación completa.'), 'Correctly decodes &#10; to newlines and preserves angle bracket content without deleting');
+
 console.log('✅ Markdown and entity formatting passed');
 
 // -------------------------------------------------------------

@@ -52,13 +52,53 @@ const ALLOWED_TAGS = new Set([
 ]);
 
 /**
+ * Decodes HTML entities (including numeric entities like &#10; for newlines,
+ * &quot;, &nbsp;, smart quotes, etc.) into their real Unicode characters.
+ */
+export function decodeHtmlEntities(text) {
+  if (!text) return '';
+  return String(text)
+    // Specific newline & carriage return entities
+    .replace(/&(?:#10|#010|#x0?A|#x0?a|NewLine);/gi, '\n')
+    .replace(/&(?:#13|#013|#x0?D|#x0?d);/gi, '\r')
+    .replace(/&(?:nbsp|#160|#xa0);/gi, ' ')
+    .replace(/&bull;/gi, '•')
+    .replace(/&ndash;/gi, '–')
+    .replace(/&mdash;/gi, '—')
+    .replace(/&lsquo;/gi, '‘')
+    .replace(/&rsquo;/gi, '’')
+    .replace(/&ldquo;/gi, '“')
+    .replace(/&rdquo;/gi, '”')
+    // Decimal numeric entities &#123;
+    .replace(/&#(\d+);/g, (_, dec) => {
+      try {
+        const code = parseInt(dec, 10);
+        return code > 0 ? String.fromCodePoint(code) : '';
+      } catch {
+        return '';
+      }
+    })
+    // Hex numeric entities &#x1F600;
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => {
+      try {
+        const code = parseInt(hex, 16);
+        return code > 0 ? String.fromCodePoint(code) : '';
+      } catch {
+        return '';
+      }
+    });
+}
+
+/**
  * Normalizes unsupported HTML structural tags (<br>, <p>, <li>, <div>, etc.)
  * and entity-encoded tags (&lt;br&gt;) into clean newlines and bullets.
  */
 export function normalizeHtmlStructure(text) {
   if (!text) return '';
 
-  return String(text)
+  let res = decodeHtmlEntities(String(text));
+
+  return res
     // Replace <br>, <br/>, <br />, &lt;br&gt;, &lt;br/&gt;, etc. with newlines
     .replace(/(?:<br\s*\/?>|&lt;br\s*\/?&gt;)/gi, '\n')
     // Replace <p>, </p>, &lt;p&gt;, &lt;/p&gt; with newlines
@@ -192,7 +232,7 @@ export function formatTelegramHtml(text) {
 
   let html = text.replace(/\r\n/g, '\n');
 
-  // Convert unsupported structural HTML tags (<br>, <p>, <li>, etc.) before anything else
+  // Convert unsupported structural HTML tags (<br>, <p>, <li>, &#10;, etc.) before anything else
   html = normalizeHtmlStructure(html);
 
   // 1. Convert code blocks: ```lang?\ncode\n``` -> <pre><code>code</code></pre>
@@ -235,16 +275,7 @@ export function formatTelegramHtml(text) {
   // 9. Convert bullet lists at start of lines: * item or - item -> • item
   html = html.replace(/^[ \t]*[-*][ \t]+(.+)$/gm, '• $1');
 
-  // 10. Strip any remaining unsupported HTML tags (e.g. <font...>, <section>, <div>, etc.)
-  html = html.replace(/<(\/)?([a-zA-Z][a-zA-Z0-9_-]*)([^>]*)>/g, (fullMatch, isClosing, rawTagName) => {
-    const tagName = rawTagName.toLowerCase();
-    if (ALLOWED_TAGS.has(tagName)) {
-      return fullMatch;
-    }
-    return '';
-  });
-
-  // 11. Protect valid Telegram HTML tags, then escape remaining raw &, <, >
+  // 10. Protect valid Telegram HTML tags, then safely escape remaining raw &, <, >
   const validTagRegex = /<\/?(b|strong|i|em|code|pre|blockquote|s|strike|del|u|ins|tg-spoiler|a)(\s+[^>]*)?\/?>/gi;
   const tags = [];
   html = html.replace(validTagRegex, (tag) => {
@@ -255,16 +286,16 @@ export function formatTelegramHtml(text) {
   // Escape raw ampersands not already part of valid entities
   html = html.replace(/&(?!(?:amp|lt|gt|quot);)/gi, '&amp;');
 
-  // Escape any raw < and > left in text
+  // Escape any raw < and > left in text (safe for angle brackets like <text> or math < 5)
   html = html.replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
   // Restore protected tags
   html = html.replace(/___TG_TAG_(\d+)___/g, (_, index) => tags[parseInt(index, 10)]);
 
-  // 12. Balance all tags to ensure strict well-formed Telegram HTML
+  // 11. Balance all tags to ensure strict well-formed Telegram HTML
   html = balanceHtmlTags(html);
 
-  // 13. Normalize excessive consecutive newlines (max 2)
+  // 12. Normalize excessive consecutive newlines (max 2)
   html = html.replace(/\n{3,}/g, '\n\n');
 
   return html.trim();
