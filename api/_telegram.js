@@ -276,7 +276,7 @@ export function formatTelegramHtml(text) {
   html = html.replace(/^[ \t]*[-*][ \t]+(.+)$/gm, '• $1');
 
   // 10. Protect valid Telegram HTML tags, then safely escape remaining raw &, <, >
-  const validTagRegex = /<\/?(b|strong|i|em|code|pre|blockquote|s|strike|del|u|ins|tg-spoiler|a)(\s+[^>]*)?\/?>/gi;
+  const validTagRegex = /<\/?(b|strong|i|em|code|pre|blockquote|s|strike|del|u|ins|tg-spoiler|a)(?:\s+[a-zA-Z0-9_-]+=(?:"[^"]*"|'[^']*')|\s+expandable)*\s*\/?>/gi;
   const tags = [];
   html = html.replace(validTagRegex, (tag) => {
     tags.push(tag);
