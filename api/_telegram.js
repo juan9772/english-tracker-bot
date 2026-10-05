@@ -1,408 +1,472 @@
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
 /**
- * Escapes characters that have special meaning in HTML (&, <, >, ").
- * Safe for inserting user-provided text into Telegram HTML templates.
+ * Telegram HTML Formatter, Balancer, and API Client
  */
-export function escapeHtml(str) {
-  if (str === null || str === undefined) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
 
-/**
- * Unescapes standard HTML entities back into plain characters.
- */
-export function unescapeHtml(str) {
-  if (!str) return '';
-  return String(str)
-    .replace(/&quot;/g, '"')
-    .replace(/&gt;/g, '>')
-    .replace(/&lt;/g, '<')
-    .replace(/&amp;/g, '&');
-}
-
-/**
- * Strips all HTML tags and unescapes entities, producing clean plain text.
- */
-export function stripHtmlToPlainText(html) {
-  if (!html) return '';
-  return unescapeHtml(
-    html
-      .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/<\/?p>/gi, '\n')
-      .replace(/<li>/gi, '\n• ')
-      .replace(/<\/li>/gi, '')
-      .replace(/<[^>]*>/g, '')
-  ).trim();
-}
-
-const ALLOWED_TAGS = new Set([
+export const SUPPORTED_TAGS = new Set([
   'b', 'strong',
   'i', 'em',
   'u', 'ins',
   's', 'strike', 'del',
-  'code', 'pre',
-  'blockquote',
+  'span',
   'tg-spoiler',
-  'a'
+  'a',
+  'code',
+  'pre',
+  'blockquote',
+  'tg-emoji'
 ]);
 
 /**
- * Decodes HTML entities (including numeric entities like &#10; for newlines,
- * &quot;, &nbsp;, smart quotes, etc.) into their real Unicode characters.
+ * Validates a single HTML tag according to Telegram Bot API specifications.
+ * Returns parsed tag info if valid, or null if invalid/unsupported.
  */
-export function decodeHtmlEntities(text) {
-  if (!text) return '';
-  return String(text)
-    // Specific newline & carriage return entities
-    .replace(/&(?:#10|#010|#x0?A|#x0?a|NewLine);/gi, '\n')
-    .replace(/&(?:#13|#013|#x0?D|#x0?d);/gi, '\r')
-    .replace(/&(?:nbsp|#160|#xa0);/gi, ' ')
-    .replace(/&bull;/gi, '•')
-    .replace(/&ndash;/gi, '–')
-    .replace(/&mdash;/gi, '—')
-    .replace(/&lsquo;/gi, '‘')
-    .replace(/&rsquo;/gi, '’')
-    .replace(/&ldquo;/gi, '“')
-    .replace(/&rdquo;/gi, '”')
-    // Decimal numeric entities &#123;
-    .replace(/&#(\d+);/g, (_, dec) => {
-      try {
-        const code = parseInt(dec, 10);
-        return code > 0 ? String.fromCodePoint(code) : '';
-      } catch {
-        return '';
-      }
-    })
-    // Hex numeric entities &#x1F600;
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => {
-      try {
-        const code = parseInt(hex, 16);
-        return code > 0 ? String.fromCodePoint(code) : '';
-      } catch {
-        return '';
-      }
-    });
+export function parseTelegramTag(tagString) {
+  if (!tagString || typeof tagString !== 'string') return null;
+
+  const match = tagString.match(/^<\s*(\/)?\s*([a-zA-Z0-9_-]+)((?:\s+[^>]*)?)\s*>$/);
+  if (!match) return null;
+
+  const isClosing = !!match[1];
+  const tagName = match[2].toLowerCase();
+  const rawAttrs = (match[3] || '').trim();
+
+  if (!SUPPORTED_TAGS.has(tagName)) {
+    return null;
+  }
+
+  if (isClosing) {
+    if (rawAttrs.length > 0) return null;
+    return { isClosing: true, tagName, cleanTag: `</${tagName}>` };
+  }
+
+  // Tags that MUST NOT have any attributes (b, strong, i, em, u, ins, s, strike, del, tg-spoiler, pre)
+  if (['b', 'strong', 'i', 'em', 'u', 'ins', 's', 'strike', 'del', 'tg-spoiler', 'pre'].includes(tagName)) {
+    if (rawAttrs.length > 0) return null;
+    return { isClosing: false, tagName, cleanTag: `<${tagName}>` };
+  }
+
+  if (tagName === 'span') {
+    if (/class=["']tg-spoiler["']/i.test(rawAttrs)) {
+      return { isClosing: false, tagName, cleanTag: '<span class="tg-spoiler">' };
+    }
+    return null;
+  }
+
+  if (tagName === 'a') {
+    const hrefMatch = rawAttrs.match(/href=(["'])(.*?)\1/i);
+    if (hrefMatch) {
+      return { isClosing: false, tagName, cleanTag: `<a href="${hrefMatch[2]}">` };
+    }
+    return { isClosing: false, tagName, cleanTag: '<a>' };
+  }
+
+  if (tagName === 'code') {
+    if (!rawAttrs) {
+      return { isClosing: false, tagName, cleanTag: '<code>' };
+    }
+    const langMatch = rawAttrs.match(/class=(["'])language-([a-zA-Z0-9_-]+)\1/i);
+    if (langMatch) {
+      return { isClosing: false, tagName, cleanTag: `<code class="language-${langMatch[2]}">` };
+    }
+    if (/^[a-zA-Z0-9_-]+=/i.test(rawAttrs)) {
+      return { isClosing: false, tagName, cleanTag: '<code>' };
+    }
+    return null;
+  }
+
+  if (tagName === 'blockquote') {
+    if (!rawAttrs) {
+      return { isClosing: false, tagName, cleanTag: '<blockquote>' };
+    }
+    if (/expandable/i.test(rawAttrs)) {
+      return { isClosing: false, tagName, cleanTag: '<blockquote expandable>' };
+    }
+    if (/^[a-zA-Z0-9_-]+=/i.test(rawAttrs)) {
+      return { isClosing: false, tagName, cleanTag: '<blockquote>' };
+    }
+    return null;
+  }
+
+  if (tagName === 'tg-emoji') {
+    const emojiMatch = rawAttrs.match(/emoji-id=(["'])(.*?)\1/i);
+    if (emojiMatch) {
+      return { isClosing: false, tagName, cleanTag: `<tg-emoji emoji-id="${emojiMatch[2]}">` };
+    }
+    return null;
+  }
+
+  return null;
 }
 
 /**
- * Normalizes unsupported HTML structural tags (<br>, <p>, <li>, <div>, etc.)
- * and entity-encoded tags (&lt;br&gt;) into clean newlines and bullets.
+ * Escapes reserved characters (&, <, >) outside of valid Telegram HTML tags.
+ * Preserves already-valid named/numeric entities and supported tags.
  */
-export function normalizeHtmlStructure(text) {
-  if (!text) return '';
+export function escapeTelegramHtml(text) {
+  if (!text || typeof text !== 'string') return '';
 
-  let res = decodeHtmlEntities(String(text));
+  // 1. Tokenize valid entities (&amp;, &lt;, &gt;, &quot;, &#123;, &#x1F44D;)
+  const entityPlaceholders = [];
+  let tokenized = text.replace(/&(amp|lt|gt|quot|#\d+|#x[0-9a-fA-F]+);/g, (match) => {
+    entityPlaceholders.push(match);
+    return `___TG_ENT_${entityPlaceholders.length - 1}___`;
+  });
 
-  return res
-    // Replace <br>, <br/>, <br />, &lt;br&gt;, &lt;br/&gt;, etc. with newlines
-    .replace(/(?:<br\s*\/?>|&lt;br\s*\/?&gt;)/gi, '\n')
-    // Replace <p>, </p>, &lt;p&gt;, &lt;/p&gt; with newlines
-    .replace(/(?:<p\b[^>]*>|&lt;p\b[^&]*&gt;)/gi, '\n\n')
-    .replace(/(?:<\/p>|&lt;\/p&gt;)/gi, '\n')
-    // Replace <li>, </li>, &lt;li&gt;, &lt;/li&gt; with bullet points
-    .replace(/(?:<li>|&lt;li&gt;)/gi, '\n• ')
-    .replace(/(?:<\/li>|&lt;\/li&gt;)/gi, '')
-    // Replace headers <h1..6> with bold
-    .replace(/(?:<h[1-6]\b[^>]*>|&lt;h[1-6]\b[^&]*&gt;)/gi, '\n\n<b>')
-    .replace(/(?:<\/h[1-6]>|&lt;\/h[1-6]&gt;)/gi, '</b>\n')
-    // Replace &nbsp; with standard space
-    .replace(/&nbsp;/gi, ' ')
-    // Replace <div>, <ul>, <ol>, etc. with newlines
-    .replace(/(?:<\/?(div|ul|ol|table|tr|td|th|tbody|thead)\b[^>]*>|&lt;\/?(div|ul|ol|table|tr|td|th|tbody|thead)\b[^&]*&gt;)/gi, '\n');
+  // 2. Tokenize valid Telegram HTML tags (without crossing line boundaries or swallowing other tags)
+  const tagPlaceholders = [];
+  const disallowedPlaceholders = [];
+  const tagCandidateRegex = /<(?:\/\s*)?[a-zA-Z][a-zA-Z0-9_-]*(?:\s+[^>\r\n<]*)?>/g;
+  tokenized = tokenized.replace(tagCandidateRegex, (match) => {
+    const parsed = parseTelegramTag(match);
+    if (parsed) {
+      tagPlaceholders.push(parsed.cleanTag);
+      return `___TG_TAG_${tagPlaceholders.length - 1}___`;
+    }
+    // Disallowed tag: escape < and > as &lt; and &gt; but preserve inner attributes
+    const escapedTag = match.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    disallowedPlaceholders.push(escapedTag);
+    return `___TG_DISALLOWED_${disallowedPlaceholders.length - 1}___`;
+  });
+
+  // 3. Escape remaining reserved characters outside protected tokens
+  tokenized = tokenized.replace(/&/g, '&amp;');
+  tokenized = tokenized.replace(/</g, '&lt;');
+  tokenized = tokenized.replace(/>/g, '&gt;');
+  tokenized = tokenized.replace(/"/g, '&quot;');
+
+  // 4. Restore disallowed escaped tags
+  tokenized = tokenized.replace(/___TG_DISALLOWED_(\d+)___/g, (_, idx) => disallowedPlaceholders[parseInt(idx, 10)]);
+
+  // 5. Restore valid tags
+  tokenized = tokenized.replace(/___TG_TAG_(\d+)___/g, (_, idx) => tagPlaceholders[parseInt(idx, 10)]);
+
+  // 6. Restore valid entities
+  tokenized = tokenized.replace(/___TG_ENT_(\d+)___/g, (_, idx) => entityPlaceholders[parseInt(idx, 10)]);
+
+  return tokenized;
+}
+
+function canonicalTag(name) {
+  if (name === 'strong') return 'b';
+  if (name === 'em') return 'i';
+  if (name === 'ins') return 'u';
+  if (name === 'strike' || name === 'del') return 's';
+  return name;
 }
 
 /**
- * Normalizes and balances Telegram-compatible HTML tags.
- * Ensures that every opened tag is closed in proper nested order,
- * unsupported HTML tags are stripped or converted, and rogue closing tags are discarded.
+ * Stack-based LIFO HTML tag balancer.
+ * Auto-closes unclosed tags in reverse order and discards orphan closing tags.
  */
 export function balanceHtmlTags(html) {
-  if (!html) return '';
+  if (!html || typeof html !== 'string') return '';
 
-  html = normalizeHtmlStructure(html);
+  // First normalize void tags that Telegram does not support
+  let sanitized = html.replace(/<br\s*\/?>/gi, '\n').replace(/<hr\s*\/?>/gi, '\n');
 
-  const tagRegex = /<(\/)?([a-zA-Z0-9_-]+)([\s\S]*?)>/g;
+  // Escape any rogue or invalid brackets so all remaining tags are valid Telegram tags
+  sanitized = escapeTelegramHtml(sanitized);
+
+  // Scan and tokenize tags vs text
+  const tagRegex = /<(\/)?([a-zA-Z0-9_-]+)((?:\s+[^>]*)?)>/g;
+  const tokens = [];
   let lastIndex = 0;
-  let result = '';
-  const stack = []; // Array of { name: string, fullOpenTag: string }
   let match;
 
-  while ((match = tagRegex.exec(html)) !== null) {
-    const [fullMatch, isClosing, rawTagName, rawAttrs] = match;
-    const tagName = rawTagName.toLowerCase();
+  while ((match = tagRegex.exec(sanitized)) !== null) {
+    if (match.index > lastIndex) {
+      tokens.push({ type: 'text', content: sanitized.slice(lastIndex, match.index) });
+    }
+    const isClosing = !!match[1];
+    const tagName = match[2].toLowerCase();
+    const rawTag = match[0];
+    tokens.push({ type: 'tag', isClosing, tagName, rawTag });
+    lastIndex = match.index + rawTag.length;
+  }
+  if (lastIndex < sanitized.length) {
+    tokens.push({ type: 'text', content: sanitized.slice(lastIndex) });
+  }
 
-    // Append text leading up to this tag
-    result += html.substring(lastIndex, match.index);
-    lastIndex = tagRegex.lastIndex;
+  const stack = []; // array of { tagName, rawTag, canon }
+  let result = '';
 
-    // Convert or discard unsupported tags
-    if (!ALLOWED_TAGS.has(tagName)) {
-      if (tagName === 'br') {
-        result += '\n';
-      } else if (tagName === 'p') {
-        result += isClosing ? '\n' : '\n';
-      } else if (tagName === 'li') {
-        result += isClosing ? '' : '• ';
-      }
+  for (const token of tokens) {
+    if (token.type === 'text') {
+      result += token.content;
       continue;
     }
 
-    if (isClosing) {
-      const indexInStack = stack.map(s => s.name).lastIndexOf(tagName);
-      if (indexInStack !== -1) {
-        // Close all tags that were opened after this tag in reverse order
-        while (stack.length > indexInStack) {
-          const popped = stack.pop();
-          result += `</${popped.name}>`;
-        }
-      }
-      // If tag was not in open stack, discard rogue closing tag
+    const canon = canonicalTag(token.tagName);
+
+    if (!token.isClosing) {
+      stack.push({ tagName: token.tagName, rawTag: token.rawTag, canon });
+      result += token.rawTag;
     } else {
-      // Opening tag: preserve valid attributes (href for <a>, expandable for <blockquote>, class for <code>)
-      let cleanAttrs = '';
-      if (tagName === 'a') {
-        const hrefMatch = rawAttrs.match(/href="([^"]*)"/i) || rawAttrs.match(/href='([^']*)'/i);
-        if (hrefMatch) {
-          cleanAttrs = ` href="${escapeHtml(unescapeHtml(hrefMatch[1]))}"`;
-        }
-      } else if (tagName === 'blockquote' && /expandable/i.test(rawAttrs)) {
-        cleanAttrs = ' expandable';
-      } else if ((tagName === 'code' || tagName === 'pre') && /class="/i.test(rawAttrs)) {
-        const classMatch = rawAttrs.match(/class="([^"]*)"/i);
-        if (classMatch) {
-          cleanAttrs = ` class="${escapeHtml(unescapeHtml(classMatch[1]))}"`;
-        }
+      if (stack.length === 0) {
+        // Orphan closing tag -> discard!
+        continue;
       }
 
-      const openTag = `<${tagName}${cleanAttrs}>`;
-      result += openTag;
-      stack.push({ name: tagName, fullOpenTag: openTag });
+      const top = stack[stack.length - 1];
+      if (top.canon === canon) {
+        stack.pop();
+        result += `</${top.tagName}>`;
+      } else if (stack.some(item => item.canon === canon)) {
+        // Mismatched nesting: close intermediate open tags in LIFO order
+        while (stack.length > 0 && stack[stack.length - 1].canon !== canon) {
+          const unclosed = stack.pop();
+          result += `</${unclosed.tagName}>`;
+        }
+        if (stack.length > 0) {
+          const matched = stack.pop();
+          result += `</${matched.tagName}>`;
+        }
+      } else {
+        // Orphan closing tag (not in stack) -> discard!
+        continue;
+      }
     }
   }
 
-  // Append remaining text
-  result += html.substring(lastIndex);
-
-  // Close any tags still unclosed at the end
+  // Auto-close any remaining unclosed tags in LIFO order
   while (stack.length > 0) {
-    const popped = stack.pop();
-    result += `</${popped.name}>`;
+    const unclosed = stack.pop();
+    result += `</${unclosed.tagName}>`;
   }
 
   return result;
 }
 
 /**
- * Returns an array of tags that remain unclosed in the given HTML string.
- */
-function getOpenTagsStack(html) {
-  const tagRegex = /<(\/)?([a-zA-Z0-9_-]+)([\s\S]*?)>/g;
-  const stack = [];
-  let match;
-
-  while ((match = tagRegex.exec(html)) !== null) {
-    const [, isClosing, rawName] = match;
-    const name = rawName.toLowerCase();
-    if (!ALLOWED_TAGS.has(name)) continue;
-
-    if (isClosing) {
-      const idx = stack.map(s => s.name).lastIndexOf(name);
-      if (idx !== -1) {
-        stack.splice(idx);
-      }
-    } else {
-      stack.push({ name, fullOpenTag: match[0] });
-    }
-  }
-
-  return stack;
-}
-
-/**
- * Converts Markdown formatting into Telegram-compatible HTML tags,
- * escapes raw entities (&, <, >), and balances tags.
+ * Converts Markdown formatting to valid Telegram HTML tags, escapes reserved entities,
+ * and balances tags with LIFO stack.
  */
 export function formatTelegramHtml(text) {
-  if (!text) return '';
+  if (!text || typeof text !== 'string') return '';
 
-  let html = text.replace(/\r\n/g, '\n');
+  let html = text;
 
-  // Convert unsupported structural HTML tags (<br>, <p>, <li>, &#10;, etc.) before anything else
-  html = normalizeHtmlStructure(html);
+  // 1. Replace void/unsupported HTML tags
+  html = html.replace(/<br\s*\/?>/gi, '\n');
+  html = html.replace(/<hr\s*\/?>/gi, '\n');
 
-  // 1. Convert code blocks: ```lang?\ncode\n``` -> <pre><code>code</code></pre>
-  html = html.replace(/```(?:[a-zA-Z0-9_-]+)?\n([\s\S]*?)```/g, (_, code) => {
-    return `<pre><code>${escapeHtml(code)}</code></pre>`;
+  // 2. Protect and convert code blocks
+  const codeBlocks = [];
+  html = html.replace(/```([a-zA-Z0-9_-]*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+    const escapedCode = code
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    const tag = lang ? `<pre><code class="language-${lang}">${escapedCode}</code></pre>` : `<pre><code>${escapedCode}</code></pre>`;
+    codeBlocks.push(tag);
+    return `@@@TG_CODE_BLOCK_${codeBlocks.length - 1}@@@`;
   });
 
-  // 2. Convert inline code: `code` -> <code>code</code>
+  // 3. Protect and convert inline code
   html = html.replace(/`([^`\n]+)`/g, (_, code) => {
-    return `<code>${escapeHtml(code)}</code>`;
+    const escapedCode = code
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    codeBlocks.push(`<code>${escapedCode}</code>`);
+    return `@@@TG_CODE_BLOCK_${codeBlocks.length - 1}@@@`;
   });
 
-  // 3. Convert headers: ### Header, ## Header, # Header -> <b>Header</b>
-  html = html.replace(/^#{1,6}[ \t]+(.+)$/gm, '<b>$1</b>');
+  // 4. Convert markdown headers: # Header -> <b>Header</b>
+  html = html.replace(/^#{1,6}\s+(.+)$/gm, '<b>$1</b>');
 
-  // 4. Convert bold: **text** or __text__ -> <b>text</b>
-  html = html.replace(/\*\*([\s\S]*?)\*\*/g, '<b>$1</b>');
-  html = html.replace(/__([\s\S]*?)__/g, '<b>$1</b>');
+  // 5. Prevent Markdown bullet collisions with italics: normalize bullets `* item` or `- item` to `• item`
+  html = html.replace(/^([ \t]*)[\*\-][ \t]+(.+)$/gm, '$1• $2');
 
-  // 5. Convert italics: *text* -> <i>text</i> (if not surrounded by *) or _text_ -> <i>text</i>
-  html = html.replace(/(?<!\*)\*([^\*\s][^\*]*?)\*(?!\*)/g, '<i>$1</i>');
-  html = html.replace(/(?<![a-zA-Z0-9_])_([^_\s][^_]*?)_(?![a-zA-Z0-9_])/g, '<i>$1</i>');
-
-  // 6. Convert strikethrough: ~~text~~ -> <s>text</s>
-  html = html.replace(/~~([\s\S]*?)~~/g, '<s>$1</s>');
-
-  // 7. Convert blockquotes: > line1\n> line2 -> <blockquote>line1\nline2</blockquote>
+  // 6. Convert markdown blockquotes: > line
   html = html.replace(/(?:^[ \t]*>[ \t]*[^\n]*(?:\n|$))+/gm, (match) => {
     const cleanContent = match
       .split('\n')
       .map(line => line.replace(/^[ \t]*>[ \t]?/, ''))
       .join('\n')
       .trim();
-    return `<blockquote>${cleanContent}</blockquote>\n`;
+    return cleanContent ? `<blockquote>${cleanContent}</blockquote>\n` : '';
   });
 
-  // 8. Convert markdown links: [text](url) -> <a href="url">text</a>
-  html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/g, '<a href="$2">$1</a>');
+  // 7. Convert bold: **bold**: -> <b>bold:</b>, then **bold** or __bold__ -> <b>bold</b>
+  html = html.replace(/\*\*([^*\n]+?)\*\*\s*:/g, '<b>$1:</b>');
+  html = html.replace(/\*\*([^*\n]+?):\*\*/g, '<b>$1:</b>');
+  html = html.replace(/__([^_\n]+?)__\s*:/g, '<b>$1:</b>');
+  html = html.replace(/__([^_\n]+?):__/g, '<b>$1:</b>');
+  html = html.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+  html = html.replace(/__(.*?)__/g, '<b>$1</b>');
 
-  // 9. Convert bullet lists at start of lines: * item or - item -> • item
-  html = html.replace(/^[ \t]*[-*][ \t]+(.+)$/gm, '• $1');
+  // 8. Convert italics: *italic* or _italic_ -> <i>italic</i>
+  html = html.replace(/(?<![\*\w])\*([^\*\s\n](?:[^\*\n]*?[^\*\s\n])?)\*(?![\*\w])/g, '<i>$1</i>');
+  html = html.replace(/(?<![_\w])_([^_\s\n](?:[^_\n]*?[^_\s\n])?)_(?![_\w])/g, '<i>$1</i>');
 
-  // 10. Protect valid Telegram HTML tags, then safely escape remaining raw &, <, >
-  const validTagRegex = /<\/?(b|strong|i|em|code|pre|blockquote|s|strike|del|u|ins|tg-spoiler|a)(?:\s+[a-zA-Z0-9_-]+=(?:"[^"]*"|'[^']*')|\s+expandable)*\s*\/?>/gi;
-  const tags = [];
-  html = html.replace(validTagRegex, (tag) => {
-    tags.push(tag);
-    return `___TG_TAG_${tags.length - 1}___`;
-  });
+  // 9. Restore code blocks
+  html = html.replace(/@@@TG_CODE_BLOCK_(\d+)@@@/g, (_, idx) => codeBlocks[parseInt(idx, 10)]);
 
-  // Escape raw ampersands not already part of valid entities
-  html = html.replace(/&(?!(?:amp|lt|gt|quot);)/gi, '&amp;');
-
-  // Escape any raw < and > left in text (safe for angle brackets like <text> or math < 5)
-  html = html.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-  // Restore protected tags
-  html = html.replace(/___TG_TAG_(\d+)___/g, (_, index) => tags[parseInt(index, 10)]);
-
-  // 11. Balance all tags to ensure strict well-formed Telegram HTML
-  html = balanceHtmlTags(html);
-
-  // 12. Normalize excessive consecutive newlines (max 2)
-  html = html.replace(/\n{3,}/g, '\n\n');
-
-  return html.trim();
+  // 10. Balance and strictly escape reserved characters
+  return balanceHtmlTags(html).trim();
 }
 
 /**
- * Finds a safe splitting index in an HTML string <= maxLength,
- * ensuring cuts do not happen inside an HTML tag (<...>) or entity (&...;).
+ * Tag-aware chunking for Telegram messages.
+ * Splits text exceeding maxLen at semantic boundaries (\n\n, \n, space)
+ * without breaking tag hierarchy (closing open tags at chunk end, reopening at next chunk start).
  */
-function findSafeSplitIndex(text, maxLen) {
-  if (text.length <= maxLen) return text.length;
-
-  const searchSlice = text.substring(0, maxLen);
-  let candidate = -1;
-
-  // 1. Paragraph boundary (\n\n)
-  const pBreak = searchSlice.lastIndexOf('\n\n');
-  if (pBreak > maxLen * 0.4) {
-    candidate = pBreak + 2;
-  } else {
-    // 2. Line boundary (\n)
-    const nlBreak = searchSlice.lastIndexOf('\n');
-    if (nlBreak > maxLen * 0.5) {
-      candidate = nlBreak + 1;
-    } else {
-      // 3. Sentence boundary (. / ! / ?)
-      const sentenceMatch = searchSlice.match(/([.!?]\s+)(?![\s\S]*[.!?]\s+)/);
-      if (sentenceMatch && sentenceMatch.index > maxLen * 0.6) {
-        candidate = sentenceMatch.index + sentenceMatch[1].length;
-      } else {
-        // 4. Word boundary
-        const spaceBreak = searchSlice.lastIndexOf(' ');
-        if (spaceBreak > maxLen * 0.7) {
-          candidate = spaceBreak + 1;
-        } else {
-          candidate = maxLen;
-        }
-      }
-    }
-  }
-
-  // Verify candidate is not inside an HTML tag <...>
-  const lastLt = text.lastIndexOf('<', candidate);
-  const lastGt = text.lastIndexOf('>', candidate);
-  if (lastLt > lastGt) {
-    candidate = lastLt; // Cut before opening tag
-  }
-
-  // Verify candidate is not inside an HTML entity &...;
-  const lastAmp = text.lastIndexOf('&', candidate);
-  const lastSemi = text.lastIndexOf(';', candidate);
-  if (lastAmp > lastSemi && candidate - lastAmp < 10) {
-    candidate = lastAmp; // Cut before ampersand
-  }
-
-  return candidate > 0 ? candidate : maxLen;
-}
-
-/**
- * Splits a long Telegram message (>4000 characters) into clean chunks,
- * ensuring each chunk is <= maxLength, tags are closed before boundaries,
- * and reopened in the next chunk so formatting is never broken.
- */
-export function splitTelegramMessage(text, maxLength = 4000) {
-  if (!text) return [];
-  if (text.length <= maxLength) {
-    return [balanceHtmlTags(text)];
+export function chunkTelegramHtml(html, maxLen = 4000) {
+  if (!html || typeof html !== 'string') return [];
+  if (html.length <= maxLen) {
+    const balanced = balanceHtmlTags(html);
+    return balanced ? [balanced] : [];
   }
 
   const chunks = [];
-  let remaining = text;
-  let carryOverOpenTags = [];
+  let current = html;
 
-  while (remaining.length > 0) {
-    // Build prefix from previously open tags
-    const prefix = carryOverOpenTags.map(t => t.fullOpenTag).join('');
-    // Reserve characters for prefix and closing tags
-    const suffixReserve = carryOverOpenTags.map(t => `</${t.name}>`).join('').length + 50;
-    const availableLen = Math.max(maxLength - prefix.length - suffixReserve, 500);
+  while (current.length > maxLen) {
+    let splitIdx = -1;
 
-    let splitIndex = findSafeSplitIndex(remaining, availableLen);
-    if (splitIndex >= remaining.length) {
-      splitIndex = remaining.length;
+    // Search backwards for semantic breaks within safe threshold (40% to 100% of maxLen)
+    const minThreshold = Math.floor(maxLen * 0.4);
+
+    const pBreak = current.lastIndexOf('\n\n', maxLen);
+    if (pBreak >= minThreshold) {
+      splitIdx = pBreak;
+    } else {
+      const lBreak = current.lastIndexOf('\n', maxLen);
+      if (lBreak >= minThreshold) {
+        splitIdx = lBreak;
+      } else {
+        const sBreak = current.lastIndexOf(' ', maxLen);
+        if (sBreak >= minThreshold) {
+          splitIdx = sBreak;
+        } else {
+          splitIdx = maxLen;
+        }
+      }
     }
 
-    const rawSlice = remaining.substring(0, splitIndex);
-    remaining = remaining.substring(splitIndex).trimStart();
+    // Ensure splitIdx is not inside a tag <...> or entity &...;
+    const preSlice = current.slice(0, splitIdx);
+    const lastOpenTag = preSlice.lastIndexOf('<');
+    const lastCloseTag = preSlice.lastIndexOf('>');
+    if (lastOpenTag > lastCloseTag) {
+      // splitIdx is inside a tag; split before the tag begins
+      splitIdx = lastOpenTag;
+    } else {
+      const lastAmp = preSlice.lastIndexOf('&');
+      const lastSemi = preSlice.lastIndexOf(';');
+      if (lastAmp > lastSemi && (splitIdx - lastAmp) < 10) {
+        // splitIdx is inside an entity; split before the ampersand
+        splitIdx = lastAmp;
+      }
+    }
 
-    // Check which tags are open in prefix + rawSlice
-    const combined = prefix + rawSlice;
-    const openTags = getOpenTagsStack(combined);
+    if (splitIdx <= 0) {
+      splitIdx = maxLen;
+    }
 
-    // Close all open tags at the end of this chunk
-    const closingSuffix = openTags.slice().reverse().map(t => `</${t.name}>`).join('');
-    const balancedChunk = combined + closingSuffix;
+    function getOpenStack(slice) {
+      const tagRegex = /<(\/)?([a-zA-Z0-9_-]+)((?:\s+[^>]*)?)>/g;
+      const stack = [];
+      let match;
+      while ((match = tagRegex.exec(slice)) !== null) {
+        const isClosing = !!match[1];
+        const tagName = match[2].toLowerCase();
+        const rawTag = match[0];
+        const canon = canonicalTag(tagName);
 
-    chunks.push(balancedChunk);
-    carryOverOpenTags = openTags;
+        if (!isClosing) {
+          stack.push({ tagName, rawTag, canon });
+        } else {
+          if (stack.length > 0 && stack[stack.length - 1].canon === canon) {
+            stack.pop();
+          } else if (stack.some(item => item.canon === canon)) {
+            while (stack.length > 0 && stack[stack.length - 1].canon !== canon) {
+              stack.pop();
+            }
+            if (stack.length > 0) stack.pop();
+          }
+        }
+      }
+      return stack;
+    }
+
+    let openStack = getOpenStack(current.slice(0, splitIdx));
+    let closingTags = '';
+    for (let i = openStack.length - 1; i >= 0; i--) {
+      closingTags += `</${openStack[i].tagName}>`;
+    }
+
+    // Budget closing tags so final chunk strictly satisfies <= maxLen
+    if (splitIdx + closingTags.length > maxLen) {
+      const budget = Math.max(1, maxLen - closingTags.length);
+      let adjusted = -1;
+      const breakPoints = ['\n\n', '\n', ' '];
+      for (const bp of breakPoints) {
+        const idx = current.lastIndexOf(bp, budget);
+        if (idx > budget * 0.4) {
+          adjusted = idx + (bp === ' ' ? 0 : bp.length);
+          break;
+        }
+      }
+      splitIdx = adjusted > 0 ? adjusted : budget;
+      openStack = getOpenStack(current.slice(0, splitIdx));
+      closingTags = '';
+      for (let i = openStack.length - 1; i >= 0; i--) {
+        closingTags += `</${openStack[i].tagName}>`;
+      }
+    }
+
+    const rawChunk = current.slice(0, splitIdx);
+
+    // Build synthetic reopening tags for the next chunk
+    let reopeningTags = '';
+    for (let i = 0; i < openStack.length; i++) {
+      reopeningTags += openStack[i].rawTag;
+    }
+
+    const balancedChunk = balanceHtmlTags(rawChunk + closingTags);
+    if (balancedChunk.trim().length > 0) {
+      chunks.push(balancedChunk);
+    }
+
+    // Remaining string continues with reopening tags prepended
+    const remainder = current.slice(splitIdx).replace(/^[\r\n]+/, '');
+    current = reopeningTags + remainder;
+  }
+
+  if (current.trim().length > 0) {
+    const finalChunk = balanceHtmlTags(current);
+    if (finalChunk.trim().length > 0) {
+      chunks.push(finalChunk);
+    }
   }
 
   return chunks;
 }
 
 /**
- * Sends a message to a Telegram chat with automatic message splitting,
- * strict HTML tag balancing, and a resilient retry mechanism (up to 5 attempts)
- * with exponential backoff, rate-limit honoring (429), and parse error recovery.
+ * Creates 2x2 interactive inline keyboard matrix for quick user actions.
+ */
+export function createInlineKeyboard() {
+  return {
+    inline_keyboard: [
+      [
+        { text: '🔥 Ver Estado', callback_data: 'cmd:status' },
+        { text: '🛡️ Usar Escudo', callback_data: 'cmd:shield' }
+      ],
+      [
+        { text: '💡 Reto de Hoy', callback_data: 'cmd:spark' },
+        { text: '📚 Repasar Vocabulario', callback_data: 'cmd:review' }
+      ]
+    ]
+  };
+}
+
+/**
+ * Sends a message to a Telegram chat with automatic HTML tag balancing,
+ * tag-aware chunking for messages > 4000 chars, support for replyMarkup options,
+ * and surgical non-destructive error recovery.
  */
 export async function sendTelegramMessage(chatId, text, options = {}) {
   const token = (process.env.TELEGRAM_BOT_TOKEN || '').trim();
@@ -416,119 +480,91 @@ export async function sendTelegramMessage(chatId, text, options = {}) {
     return false;
   }
 
-  if (!text || !String(text).trim()) {
-    return true;
+  if (!text || typeof text !== 'string') {
+    return false;
   }
 
-  const MAX_RETRIES = 5;
-  const chunks = splitTelegramMessage(String(text));
+  const chunks = chunkTelegramHtml(text, 4000);
+  if (chunks.length === 0) {
+    return false;
+  }
+
   const url = `https://api.telegram.org/bot${token}/sendMessage`;
+  const replyMarkup = options.reply_markup || options.replyMarkup;
+  let allSuccess = true;
 
-  for (let c = 0; c < chunks.length; c++) {
-    let currentChunk = chunks[c];
-    let parseMode = 'HTML';
-    let chunkSuccess = false;
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    const isLastChunk = (i === chunks.length - 1);
 
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        const payload = {
-          chat_id: chatId,
-          text: currentChunk
-        };
-        if (parseMode) {
-          payload.parse_mode = parseMode;
-        }
+    const payload = {
+      chat_id: chatId,
+      text: chunk,
+      parse_mode: 'HTML'
+    };
 
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
+    if (isLastChunk && replyMarkup) {
+      payload.reply_markup = replyMarkup;
+    }
 
-        if (response.ok) {
-          chunkSuccess = true;
-          break;
-        }
+    if (options.disable_web_page_preview !== undefined) {
+      payload.disable_web_page_preview = options.disable_web_page_preview;
+    }
 
-        const status = response.status;
-        let errorData = null;
-        let errorDescription = '';
+    try {
+      let response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
 
-        try {
-          const rawErr = await response.text();
-          try {
-            errorData = JSON.parse(rawErr);
-            errorDescription = errorData.description || rawErr;
-          } catch {
-            errorDescription = rawErr;
+      if (!response.ok) {
+        const errorMsg = await response.text();
+        console.error(`Telegram API error (status ${response.status}):`, errorMsg);
+
+        // Surgical non-destructive recovery on HTTP 400
+        if (response.status === 400) {
+          console.warn('Attempting non-destructive HTML repair on Telegram 400...');
+          const repaired = balanceHtmlTags(chunk);
+
+          let retryResponse = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              ...payload,
+              text: repaired
+            })
+          });
+
+          if (!retryResponse.ok) {
+            // Non-destructive fallback: escape entities without stripping text content
+            const safeEscaped = chunk
+              .replace(/&/g, '&amp;')
+              .replace(/</g, '&lt;')
+              .replace(/>/g, '&gt;');
+
+            retryResponse = await fetch(url, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                ...payload,
+                text: safeEscaped
+              })
+            });
           }
-        } catch {
-          errorDescription = `HTTP Status ${status}`;
-        }
 
-        console.warn(`Telegram API error (chunk ${c + 1}/${chunks.length}, attempt ${attempt}/${MAX_RETRIES}, status ${status}):`, errorDescription);
-
-        // 1. Rate Limit (HTTP 429)
-        if (status === 429) {
-          const retryAfterSec = errorData?.parameters?.retry_after || Math.min(attempt * 2, 5);
-          const waitMs = Math.min(retryAfterSec * 1000, 10000);
-          console.warn(`Telegram rate limit hit. Sleeping ${waitMs}ms before attempt ${attempt + 1}...`);
-          await sleep(waitMs);
-          continue;
-        }
-
-        // 2. Parse Error (HTTP 400 with "can't parse entities")
-        if (status === 400 && /can't parse entities/i.test(errorDescription)) {
-          if (attempt === 1) {
-            console.warn('Re-balancing HTML tags for retry...');
-            currentChunk = balanceHtmlTags(currentChunk);
-          } else {
-            console.warn('Falling back to clean plain text due to persistent Telegram entity parsing error...');
-            parseMode = null;
-            currentChunk = stripHtmlToPlainText(currentChunk);
+          if (!retryResponse.ok) {
+            allSuccess = false;
           }
-          await sleep(200 * attempt);
-          continue;
-        }
-
-        // 3. Message Too Long (HTTP 400 with "message is too long")
-        if (status === 400 && /message is too long/i.test(errorDescription)) {
-          console.warn('Telegram reported message too long, recursively sub-splitting chunk...');
-          const subChunks = splitTelegramMessage(currentChunk, 2000);
-          let allSubsSucceeded = true;
-          for (const sub of subChunks) {
-            const subOk = await sendTelegramMessage(chatId, sub, options);
-            if (!subOk) allSubsSucceeded = false;
-          }
-          chunkSuccess = allSubsSucceeded;
-          break;
-        }
-
-        // 4. Non-retriable client errors (e.g. Chat not found, Bot blocked by user)
-        if (status === 400 || status === 403) {
-          console.error(`Telegram non-retriable error (${status}):`, errorDescription);
-          return false;
-        }
-
-        // 5. Transient Server Errors (500, 502, 503, 504) or others: Exponential backoff
-        if (attempt < MAX_RETRIES) {
-          const backoffMs = Math.min(400 * Math.pow(2, attempt - 1), 4000);
-          await sleep(backoffMs);
-        }
-      } catch (fetchErr) {
-        console.error(`Network exception sending Telegram message (chunk ${c + 1}/${chunks.length}, attempt ${attempt}/${MAX_RETRIES}):`, fetchErr.message || fetchErr);
-        if (attempt < MAX_RETRIES) {
-          const backoffMs = Math.min(400 * Math.pow(2, attempt - 1), 4000);
-          await sleep(backoffMs);
+        } else {
+          allSuccess = false;
         }
       }
-    }
-
-    if (!chunkSuccess) {
-      console.error(`Failed to send Telegram message chunk ${c + 1} after ${MAX_RETRIES} attempts.`);
-      return false;
+    } catch (err) {
+      console.error('Failed to connect to Telegram API:', err);
+      allSuccess = false;
     }
   }
 
-  return true;
+  return allSuccess;
 }

@@ -419,7 +419,7 @@ async function runTests() {
   assert(fetchCalls.some(c => c.body.text.includes('se han restablecido a <b>2</b>')), 'Shields reset notification was sent');
   
   state = await getState();
-  assert(state.users.userA.shields === 1, 'Shields reset to 2 on Monday and then 1 consumed for missed Sunday');
+  assert(state.users.userA.shields === 2, 'Shields reset to 2 on Monday for the new week');
 
   console.log('\n🎉 ALL OFFLINE TESTS PASSED SUCCESSFULLY!');
 }

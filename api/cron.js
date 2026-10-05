@@ -1,7 +1,89 @@
 import { getState, saveState } from './_db.js';
-import { sendTelegramMessage, escapeHtml } from './_telegram.js';
+import { sendTelegramMessage } from './_telegram.js';
 import { getLocalDateString, getPreviousDateString, getLocalDateParts, getDayOfWeek } from './_time.js';
 import { processQueue } from './_queue.js';
+
+/**
+ * Adds 24 hours to the given YYYY-MM-DD date using UTC noon
+ * to avoid daylight saving time transitions.
+ */
+export function getNextDateString(dateStr) {
+  const localDateAtNoon = new Date(`${dateStr}T12:00:00Z`);
+  const nextLocalDate = new Date(localDateAtNoon.getTime() + 24 * 60 * 60 * 1000);
+  const nextYear = nextLocalDate.getUTCFullYear();
+  const nextMonth = String(nextLocalDate.getUTCMonth() + 1).padStart(2, '0');
+  const nextDay = String(nextLocalDate.getUTCDate()).padStart(2, '0');
+  return `${nextYear}-${nextMonth}-${nextDay}`;
+}
+
+const PENALTIES = [
+  "comprarle un café al otro ☕ (transferir dinero por Mercado Pago o Paypal).",
+  "mandarle un regalito o comida sorpresa por PedidosYa, Rappi o UberEats 🍕.",
+  "grabar un audio cantando 30 segundos de una canción en inglés elegida por el ganador 🎤 y mandarlo al grupo.",
+  "grabar un audio de 1 minuto leyendo un texto en inglés con un acento británico o de Shakespeare exagerado 🎭.",
+  "cambiar su foto de perfil de Telegram por un meme elegido por el ganador por 24 horas 🖼️."
+];
+
+/**
+ * Multi-day catchup algorithm evaluating un-evaluated days sequentially
+ * from lastEvaluatedDate + 1 to previousDateStr.
+ */
+export function evaluateMultiDayCatchup(user, currentDateStr) {
+  const previousDateStr = getPreviousDateString(currentDateStr);
+  if (!user.lastEvaluatedDate) {
+    user.lastEvaluatedDate = previousDateStr;
+    return { evaluatedDays: [], penalties: [], shieldsUsed: 0 };
+  }
+
+  const evaluatedDays = [];
+  const penalties = [];
+  let shieldsUsed = 0;
+
+  let evalDate = getNextDateString(user.lastEvaluatedDate);
+
+  while (evalDate <= previousDateStr) {
+    evaluatedDays.push(evalDate);
+    const evalDayOfWeek = getDayOfWeek(evalDate);
+
+    // Monday weekly reset for intermediate Monday
+    if (evalDayOfWeek === 1 && user.lastShieldResetDate !== evalDate) {
+      user.shields = 2;
+      user.lastShieldResetDate = evalDate;
+    }
+
+    const completed = (user.checkInHistory && (
+                        Array.isArray(user.checkInHistory)
+                          ? user.checkInHistory.includes(evalDate)
+                          : !!user.checkInHistory[evalDate]
+                      )) ||
+                      (user.shieldHistory && (
+                        Array.isArray(user.shieldHistory)
+                          ? user.shieldHistory.includes(evalDate)
+                          : !!user.shieldHistory[evalDate]
+                      )) ||
+                      user.lastCheckIn === evalDate ||
+                      user.lastShieldUsedDate === evalDate;
+
+    if (!completed) {
+      if (user.shields > 0) {
+        user.shields -= 1;
+        user.lastShieldUsedDate = evalDate;
+        shieldsUsed += 1;
+      } else {
+        const oldStreak = user.streak || 0;
+        user.streak = 0;
+        if (oldStreak > 0) {
+          penalties.push({ date: evalDate, previousStreak: oldStreak });
+        }
+      }
+    }
+
+    user.lastEvaluatedDate = evalDate;
+    evalDate = getNextDateString(evalDate);
+  }
+
+  return { evaluatedDays, penalties, shieldsUsed };
+}
 
 function respond(res, code, body) {
   if (typeof res?.status === 'function') {
@@ -34,15 +116,21 @@ export default async function handler(req, res) {
     await processQueue(state);
 
     const announcementChatId = state.chatId || process.env.TELEGRAM_CHAT_ID;
-    
-    // Check if User B is configured
-    const isUserBActive = !!(process.env.USER_B_USERNAME || state.users.userB.username || state.users.userB.id);
 
-    const usersToProcess = [
-      { key: 'userA', user: state.users.userA }
-    ];
-    if (isUserBActive) {
-      usersToProcess.push({ key: 'userB', user: state.users.userB });
+    // Collect all active users dynamically
+    const usersToProcess = [];
+    if (state.users && typeof state.users === 'object') {
+      for (const [key, user] of Object.entries(state.users)) {
+        if (!user || typeof user !== 'object') continue;
+
+        // Skip userB if legacy inactive (no username, no id, no streak)
+        if (key === 'userB') {
+          const isUserBActive = !!(process.env.USER_B_USERNAME || user.username || user.id || (user.streak && user.streak > 0));
+          if (!isUserBActive) continue;
+        }
+
+        usersToProcess.push({ key, user });
+      }
     }
 
     let stateChanged = false;
@@ -52,77 +140,124 @@ export default async function handler(req, res) {
       const now = new Date();
       const currentDateStr = getLocalDateString(now, user.timezone);
       const previousDateStr = getPreviousDateString(currentDateStr);
-      const parts = getLocalDateParts(now, user.timezone);
       const localDayOfWeek = getDayOfWeek(currentDateStr); // 1 = Monday
-      const safeUserName = escapeHtml(user.name);
 
-      // 1. Check for Monday weekly shield reset
+      // Safety Net: If never evaluated, set it to previousDateStr to avoid retro-penalizing
+      if (!user.lastEvaluatedDate) {
+        user.lastEvaluatedDate = previousDateStr;
+        stateChanged = true;
+        // Also check if today is Monday for fresh setup
+        if (localDayOfWeek === 1 && user.lastShieldResetDate !== currentDateStr) {
+          user.shields = 2;
+          user.lastShieldResetDate = currentDateStr;
+          messagesToSend.push({
+            chatId: announcementChatId,
+            text: `✨ <b>¡Comienza una nueva semana!</b> Los escudos de <b>${user.name}</b> se han restablecido a <b>2</b>. 🛡️ ¡Úsalos con sabiduría!\n\n<i>English tip:</i> "A fresh start is a clean slate. Make this week count!" 🚀`
+          });
+        }
+        continue;
+      }
+
+      // Sequential multi-day catchup loop: from lastEvaluatedDate + 1 to previousDateStr
+      let evalDate = getNextDateString(user.lastEvaluatedDate);
+
+      while (evalDate <= previousDateStr) {
+        const evalDayOfWeek = getDayOfWeek(evalDate); // 1 = Monday
+
+        // Monday weekly shield reset for intermediate Monday
+        if (evalDayOfWeek === 1 && user.lastShieldResetDate !== evalDate) {
+          user.shields = 2;
+          user.lastShieldResetDate = evalDate;
+          stateChanged = true;
+          messagesToSend.push({
+            chatId: announcementChatId,
+            text: `✨ <b>¡Comienza una nueva semana!</b> Los escudos de <b>${user.name}</b> se han restablecido a <b>2</b>. 🛡️ ¡Úsalos con sabiduría!\n\n<i>English tip:</i> "A fresh start is a clean slate. Make this week count!" 🚀`
+          });
+        }
+
+        // Check compliance for evalDate
+        const completed = (user.checkInHistory && (
+                            Array.isArray(user.checkInHistory)
+                              ? user.checkInHistory.includes(evalDate)
+                              : !!user.checkInHistory[evalDate]
+                          )) ||
+                          (user.shieldHistory && (
+                            Array.isArray(user.shieldHistory)
+                              ? user.shieldHistory.includes(evalDate)
+                              : !!user.shieldHistory[evalDate]
+                          )) ||
+                          user.lastCheckIn === evalDate ||
+                          user.lastShieldUsedDate === evalDate;
+
+        if (completed) {
+          user.lastEvaluatedDate = evalDate;
+          stateChanged = true;
+          console.log(`[Cron Catchup] User ${user.name} (${key}) verified for ${evalDate}.`);
+        } else {
+          // Failed to complete practice on evalDate
+          if (user.shields > 0) {
+            user.shields -= 1;
+            user.lastShieldUsedDate = evalDate;
+            user.lastEvaluatedDate = evalDate;
+            stateChanged = true;
+
+            messagesToSend.push({
+              chatId: announcementChatId,
+              text: `⚠️ <b>${user.name}</b> no registró su práctica de inglés el día <b>${evalDate}</b>... ¡Pero se ha salvado usando un escudo automático! 🛡️ Le quedan <b>${user.shields} escudos</b> para esta semana.\n\n<i>English reminder:</i> "Don't let the streak break! Try to practice today!" ✍️`
+            });
+          } else {
+            // Out of shields: streak resets to 0 and trigger penalty
+            const oldStreak = user.streak;
+            user.streak = 0;
+            user.lastEvaluatedDate = evalDate;
+            stateChanged = true;
+            state.forceReset = true; // Crucial for Redis protection safeguard bypass
+
+            if (oldStreak > 0) {
+              const randomPenalty = PENALTIES[Math.floor(Math.random() * PENALTIES.length)];
+
+              messagesToSend.push({
+                chatId: announcementChatId,
+                text: `🚨💥 <b>¡LA CONSTANCIA SE HA ROTO!</b> 💥🚨\n\n` +
+                  `<b>${user.name}</b> no completó su práctica de inglés el día <b>${evalDate}</b> y no le quedaban escudos. 😱\n\n` +
+                  `Su racha de <b>${oldStreak} días</b> se ha desplomado a <b>0</b>. 😭\n\n` +
+                  `⚡ <b>PENALIZACIÓN:</b> Deberá <b>${randomPenalty}</b>\n\n` +
+                  `<i>English lesson:</i> "Consistency is hard, but excuses don't build habits. Pay the price and start again!" 💀`
+              });
+            }
+          }
+        }
+
+        evalDate = getNextDateString(evalDate);
+      }
+
+      // Check for Monday weekly shield reset on currentDateStr (today)
       if (localDayOfWeek === 1 && user.lastShieldResetDate !== currentDateStr) {
         user.shields = 2;
         user.lastShieldResetDate = currentDateStr;
         stateChanged = true;
-        
         messagesToSend.push({
           chatId: announcementChatId,
-          text: `✨ <b>¡Comienza una nueva semana!</b> Los escudos de <b>${safeUserName}</b> se han restablecido a <b>2</b>. 🛡️ ¡Úsalos con sabiduría!\n\n<i>English tip:</i> "A fresh start is a clean slate. Make this week count!" 🚀`
+          text: `✨ <b>¡Comienza una nueva semana!</b> Los escudos de <b>${user.name}</b> se han restablecido a <b>2</b>. 🛡️ ¡Úsalos con sabiduría!\n\n<i>English tip:</i> "A fresh start is a clean slate. Make this week count!" 🚀`
         });
       }
 
-      // 2. Safety Net: If never evaluated, set it to previousDateStr to avoid retro-penalizing
-      if (!user.lastEvaluatedDate) {
-        user.lastEvaluatedDate = previousDateStr;
-        stateChanged = true;
-        continue;
+      // Prune historical arrays or objects to conserve Redis memory
+      if (user.checkInHistory) {
+        if (Array.isArray(user.checkInHistory)) {
+          user.checkInHistory = user.checkInHistory.filter(d => d >= user.lastEvaluatedDate);
+        } else if (typeof user.checkInHistory === 'object') {
+          for (const d of Object.keys(user.checkInHistory)) {
+            if (d < user.lastEvaluatedDate) delete user.checkInHistory[d];
+          }
+        }
       }
-
-      // 3. Process midnight evaluation
-      // If the user's lastEvaluatedDate is not the previous day, it means we transitioned
-      // past midnight into a new day (or multiple days if bot was down) and need to evaluate compliance
-      if (user.lastEvaluatedDate !== previousDateStr) {
-        // Did the user check in or manually use a shield for previousDateStr?
-        const completed = user.lastCheckIn === previousDateStr || user.lastShieldUsedDate === previousDateStr;
-
-        if (completed) {
-          // All good! No penalty. Just progress the evaluation date.
-          user.lastEvaluatedDate = previousDateStr;
-          stateChanged = true;
-          console.log(`User ${key} completed their task on ${previousDateStr}. No action needed.`);
-        } else {
-          // Failed to complete task. Let's see if we can save them with a shield.
-          if (user.shields > 0) {
-            user.shields -= 1;
-            user.lastShieldUsedDate = previousDateStr;
-            user.lastEvaluatedDate = previousDateStr;
-            stateChanged = true;
-
-            messagesToSend.push({
-              chatId: announcementChatId,
-              text: `⚠️ <b>${safeUserName}</b> no registró su frase de inglés ayer... ¡Pero se ha salvado usando un escudo automático! 🛡️ Le quedan <b>${user.shields} escudos</b> para esta semana.\n\n<i>English reminder:</i> "Don't let the streak break! Try to practice today!" ✍️`
-            });
-          } else {
-            // No shields left. Streak resets to 0!
-            const oldStreak = user.streak;
-            user.streak = 0;
-            user.lastEvaluatedDate = previousDateStr;
-            stateChanged = true;
-
-            const PENALTIES = [
-              "comprarle un café al otro ☕ (transferir dinero por Mercado Pago o Paypal).",
-              "mandarle un regalito o comida sorpresa por PedidosYa, Rappi o UberEats 🍕.",
-              "grabar un audio cantando 30 segundos de una canción en inglés elegida por el ganador 🎤 y mandarlo al grupo.",
-              "grabar un audio de 1 minuto leyendo un texto en inglés con un acento británico o de Shakespeare exagerado 🎭.",
-              "cambiar su foto de perfil de Telegram por un meme elegido por el ganador por 24 horas 🖼️."
-            ];
-            const randomPenalty = PENALTIES[Math.floor(Math.random() * PENALTIES.length)];
-
-            messagesToSend.push({
-              chatId: announcementChatId,
-              text: `🚨💥 <b>¡LA CONSTANCIA SE HA ROTO!</b> 💥🚨\n\n` +
-                `<b>${safeUserName}</b> no completó su práctica de inglés ayer y no le quedaban escudos. 😱\n\n` +
-                `Su racha de <b>${oldStreak} días</b> se ha desplomado a <b>0</b>. 😭\n\n` +
-                `⚡ <b>PENALIZACIÓN:</b> Deberá <b>${randomPenalty}</b>\n\n` +
-                `<i>English lesson:</i> "Consistency is hard, but excuses don't build habits. Pay the price and start again!" 💀`
-            });
+      if (user.shieldHistory) {
+        if (Array.isArray(user.shieldHistory)) {
+          user.shieldHistory = user.shieldHistory.filter(d => d >= user.lastEvaluatedDate);
+        } else if (typeof user.shieldHistory === 'object') {
+          for (const d of Object.keys(user.shieldHistory)) {
+            if (d < user.lastEvaluatedDate) delete user.shieldHistory[d];
           }
         }
       }

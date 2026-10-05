@@ -1,8 +1,14 @@
 import { saveState } from './_db.js';
-import { sendTelegramMessage, formatTelegramHtml, escapeHtml } from './_telegram.js';
+import {
+  sendTelegramMessage,
+  formatTelegramHtml,
+  balanceHtmlTags,
+  chunkTelegramHtml,
+  createInlineKeyboard
+} from './_telegram.js';
 import { getLocalDateString } from './_time.js';
 
-export { formatTelegramHtml, escapeHtml };
+export { formatTelegramHtml, balanceHtmlTags, chunkTelegramHtml, createInlineKeyboard };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -32,12 +38,7 @@ Analiza el mensaje del usuario y responde estrictamente en JSON con los siguient
 4. "dynamicReply": Respuesta detallada en español (estilo amigable, rioplatense/cálido).
 
 REGLAS PARA "dynamicReply" CUANDO "intent" ES "done" Y "isEnglishValid" ES TRUE:
-Debes proporcionar una corrección de ALTA CALIDAD, PROFUNDA, ESTRUCTURADA Y PEDAGÓGICA en español (alrededor de 200 a 400 palabras), con la siguiente estructura exacta usando formato HTML compatible con Telegram (<b>negrita</b>, <i>cursiva</i>, <code>código</code>, <blockquote>bloque de cita</blockquote>):
-REGLAS ESTRICTAS DE FORMATO:
-- Escribe texto con saltos de línea normales (\n o \n\n). NUNCA uses entidades numéricas como &#10; o &#13;.
-- NUNCA uses etiquetas HTML como <br>, <p>, <div>, <span> ni <li>.
-- En la sección "Qué mejoraría de tu versión", separa cada punto con un salto de línea doble (\n\n) y resalta el encabezado del punto en negrita (ej: <b>1. "frase original" vs. "sugerencia":</b>). NUNCA uses corchetes angulares < ni > para encerrar frases.
-- Asegúrate de cerrar siempre todas las etiquetas abiertas (<b>...</b>, <i>...</i>, <blockquote>...</blockquote>).
+Debes proporcionar una corrección de ALTA CALIDAD, PROFUNDA, ESTRUCTURADA Y PEDAGÓGICA en español, con la siguiente estructura exacta (usando formato HTML compatible con Telegram: <b>negrita</b>, <i>cursiva</i>, <code>código</code>, <blockquote>bloque de cita</blockquote>):
 
 1. **Feedback Inicial y Versión Reescribida Natural**:
    - Da un comentario cálido y motivador sobre la idea que expresó el usuario.
@@ -144,7 +145,6 @@ MENSAJE DEL USUARIO:
  */
 export async function executeParsedCommand(user, userKey, command, args, geminiResult, chatId, state) {
   const currentDateStr = getLocalDateString(new Date(), user.timezone);
-  const safeUserName = escapeHtml(user.name);
 
   if (command === 'chat') {
     if (geminiResult && geminiResult.dynamicReply) {
@@ -156,7 +156,7 @@ export async function executeParsedCommand(user, userKey, command, args, geminiR
   if (command === 'start') {
     await saveState(state);
     const welcome = geminiResult && geminiResult.dynamicReply ? formatTelegramHtml(geminiResult.dynamicReply) :
-      `¡Hola, <b>${safeUserName}</b>! 👋 Bienvenidos a nuestro rincón de constancia en inglés. 🇬🇧 Aquí vamos a asegurarnos de que practiques todos los días. ¡A no aflojar!\n\n` +
+      `¡Hola, <b>${user.name}</b>! 👋 Bienvenidos a nuestro rincón de constancia en inglés. 🇬🇧 Aquí vamos a asegurarnos de que practiques todos los días. ¡A no aflojar!\n\n` +
       `Tus comandos disponibles son:\n` +
       `👉 <b><code>/done [frase en inglés]</code></b> - Hace tu check-in del día (mínimo 10 caracteres).\n` +
       `👉 <b><code>/shield</code></b> - Gasta un escudo semanal (máximo 2 por semana) si hoy no puedes estudiar.\n` +
@@ -172,9 +172,9 @@ export async function executeParsedCommand(user, userKey, command, args, geminiR
 
     if (!isEnglishValid) {
       const exampleText = geminiResult && geminiResult.dynamicReply ?
-        `¡Epa, <b>${safeUserName}</b>! 🚨\n\n` +
+        `¡Epa, <b>${user.name}</b>! 🚨\n\n` +
         `${formatTelegramHtml(geminiResult.dynamicReply)}` :
-        `¡Epa, <b>${safeUserName}</b>! 🚨 La frase de hoy debe tener al menos 10 caracteres para contar como práctica real. ¡No me hagas trampa! 😉\n\n` +
+        `¡Epa, <b>${user.name}</b>! 🚨 La frase de hoy debe tener al menos 10 caracteres para contar como práctica real. ¡No me hagas trampa! 😉\n\n` +
         `Intenta escribir algo que hayas aprendido, leído o escuchado hoy. Por ejemplo:\n` +
         `👉 <code>/done Today I learned the difference between "make" and "do".</code>\n` +
         `👉 <code>/done I read a short article in English and practiced my listening.</code>\n\n` +
@@ -185,10 +185,8 @@ export async function executeParsedCommand(user, userKey, command, args, geminiR
     }
 
     if (user.lastCheckIn === currentDateStr) {
-      const doubleCheckInMsg = geminiResult && geminiResult.dynamicReply ?
-        `¡Che, <b>${safeUserName}</b>! Ya registré tu práctica de hoy, ¡pero igual acá tenés la corrección de esta frase extra para seguir aprendiendo! 🌟\n\n` +
-        `${formatTelegramHtml(geminiResult.dynamicReply)}` :
-        `¡Che, <b>${safeUserName}</b>! Ya registré tu práctica de hoy. ¡No hace falta que lo hagas de nuevo! 🌟\n\n` +
+      const doubleCheckInMsg = geminiResult && geminiResult.dynamicReply ? formatTelegramHtml(geminiResult.dynamicReply) :
+        `¡Che, <b>${user.name}</b>! Ya registré tu práctica de hoy. ¡No hace falta que lo hagas de nuevo! 🌟\n\n` +
         `<i>Well done!</i> "Keep shining and enjoy your rest! ✨"`;
       
       await sendTelegramMessage(chatId, doubleCheckInMsg);
@@ -210,12 +208,12 @@ export async function executeParsedCommand(user, userKey, command, args, geminiR
     const formattedReply = geminiResult?.dynamicReply ? formatTelegramHtml(geminiResult.dynamicReply) : '';
 
     const successMsg = geminiResult && geminiResult.dynamicReply ?
-      `¡Espectacular, <b>${safeUserName}</b>! 🎉 He registrado tu práctica de hoy:\n\n` +
+      `¡Espectacular, <b>${user.name}</b>! 🎉 He registrado tu práctica de hoy:\n\n` +
       `${formattedReply}\n\n` +
       `${shieldRefundText}` +
       `Tu racha actual ahora es de 🔥 <b>${user.streak} días</b>.` :
-      `¡Espectacular, <b>${safeUserName}</b>! 🎉 He registrado tu frase de hoy:\n` +
-      `<i>"${escapeHtml(args)}"</i>\n\n` +
+      `¡Espectacular, <b>${user.name}</b>! 🎉 He registrado tu frase de hoy:\n` +
+      `<i>"${args}"</i>\n\n` +
       `${shieldRefundText}` +
       `Tu racha actual ahora es de 🔥 <b>${user.streak} días</b>.\n\n` +
       `<i>Awesome job!</i> "Every small step takes you closer to fluency! Keep it up! 🚀"`;
@@ -226,8 +224,8 @@ export async function executeParsedCommand(user, userKey, command, args, geminiR
 
   if (command === 'shield') {
     if (user.lastCheckIn === currentDateStr) {
-      const reply = geminiResult && geminiResult.dynamicReply ? geminiResult.dynamicReply :
-        `¡Che, <b>${safeUserName}</b>! Hoy ya hiciste tu check-in de inglés, así que no necesitas gastar un escudo. ¡Guárdalo para cuando de verdad te haga falta! 😉\n\n` +
+      const reply = geminiResult && geminiResult.dynamicReply ? formatTelegramHtml(geminiResult.dynamicReply) :
+        `¡Che, <b>${user.name}</b>! Hoy ya hiciste tu check-in de inglés, así que no necesitas gastar un escudo. ¡Guárdalo para cuando de verdad te haga falta! 😉\n\n` +
         `<i>Good decision!</i> "Use your shields wisely! 🛡️"`;
       
       await sendTelegramMessage(chatId, reply);
@@ -235,8 +233,8 @@ export async function executeParsedCommand(user, userKey, command, args, geminiR
     }
 
     if (user.lastShieldUsedDate === currentDateStr) {
-      const reply = geminiResult && geminiResult.dynamicReply ? geminiResult.dynamicReply :
-        `¡Ojo! Hoy ya activaste tu escudo protector, <b>${safeUserName}</b>. ¡Estás a salvo por hoy! 🛡️ Descansa tranquilo.\n\n` +
+      const reply = geminiResult && geminiResult.dynamicReply ? formatTelegramHtml(geminiResult.dynamicReply) :
+        `¡Ojo! Hoy ya activaste tu escudo protector, <b>${user.name}</b>. ¡Estás a salvo por hoy! 🛡️ Descansa tranquilo.\n\n` +
         `<i>Take it easy!</i> "Enjoy your day off! 🍕"`;
       
       await sendTelegramMessage(chatId, reply);
@@ -248,18 +246,19 @@ export async function executeParsedCommand(user, userKey, command, args, geminiR
       user.lastShieldUsedDate = currentDateStr;
       await saveState(state);
 
+      const formattedShieldReply = geminiResult && geminiResult.dynamicReply ? formatTelegramHtml(geminiResult.dynamicReply) : '';
       const reply = geminiResult && geminiResult.dynamicReply ?
-        `🛡️ ¡Escudo activado para hoy, <b>${safeUserName}</b>!\n\n` +
-        `<i>${geminiResult.dynamicReply}</i>\n\n` +
+        `🛡️ ¡Escudo activado para hoy, <b>${user.name}</b>!\n\n` +
+        `${formattedShieldReply}\n\n` +
         `Te quedan <b>${user.shields} escudos</b> para esta semana.` :
-        `🛡️ ¡Escudo activado para hoy, <b>${safeUserName}</b>! Quedas libre del inglés por este día sin perder tu racha de 🔥 <b>${user.streak} días</b>. Te quedan <b>${user.shields} escudos</b> para esta semana.\n\n` +
+        `🛡️ ¡Escudo activado para hoy, <b>${user.name}</b>! Quedas libre del inglés por este día sin perder tu racha de 🔥 <b>${user.streak} días</b>. Te quedan <b>${user.shields} escudos</b> para esta semana.\n\n` +
         `<i>Enjoy your break!</i> "Rest is part of the work. See you tomorrow! 💤"`;
       
       await sendTelegramMessage(chatId, reply);
       return 'Shield activated';
     } else {
-      const reply = geminiResult && geminiResult.dynamicReply ? geminiResult.dynamicReply :
-        `¡Uf, qué mala suerte, <b>${safeUserName}</b>! 😰 Ya no te quedan escudos disponibles para esta semana (recuerda que se resetean los lunes). ¡Vas a tener que meterle pata y hacer <code>/done</code> para no perder la racha!\n\n` +
+      const reply = geminiResult && geminiResult.dynamicReply ? formatTelegramHtml(geminiResult.dynamicReply) :
+        `¡Uf, qué mala suerte, <b>${user.name}</b>! 😰 Ya no te quedan escudos disponibles para esta semana (recuerda que se resetean los lunes). ¡Vas a tener que meterle pata y hacer <code>/done</code> para no perder la racha!\n\n` +
         `<i>Don't give up!</i> "No pain, no gain! You've got this! 💥"`;
       
       await sendTelegramMessage(chatId, reply);
@@ -299,15 +298,15 @@ export async function executeParsedCommand(user, userKey, command, args, geminiR
       shieldsB = '🛡️ <b>Escudos:</b> -';
     }
 
-    const reportHeader = geminiResult && geminiResult.dynamicReply ? geminiResult.dynamicReply + '\n\n' : '';
+    const reportHeader = geminiResult && geminiResult.dynamicReply ? formatTelegramHtml(geminiResult.dynamicReply) + '\n\n' : '';
 
     const report = reportHeader +
       `📊 <b>ESTADO DE CONSTANCIA EN INGLÉS</b> 🇬🇧\n\n` +
-      `👤 <b>${escapeHtml(state.users.userA.name)}</b>\n` +
+      `👤 <b>${state.users.userA.name}</b>\n` +
       `🔥 <b>Racha:</b> ${state.users.userA.streak} días\n` +
       `🛡️ <b>Escudos:</b> ${state.users.userA.shields} / 2\n` +
       `⚡ <b>Hoy:</b> ${statusA}\n\n` +
-      `👤 <b>${escapeHtml(state.users.userB.name)}</b>\n` +
+      `👤 <b>${state.users.userB.name}</b>\n` +
       `${streakB}\n` +
       `${shieldsB}\n` +
       `⚡ <b>Hoy:</b> ${statusB}\n\n` +

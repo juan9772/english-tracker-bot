@@ -3,52 +3,470 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Telegram English Tracker Bot</title>
+  <title>Telegram English Tracker Bot — Dashboard</title>
   <style>
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      background: #0f172a;
-      color: #f8fafc;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      min-height: 100vh;
+    :root {
+      --bg-main: #0f172a;
+      --bg-card: #1e293b;
+      --bg-card-hover: #27354f;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --accent-primary: #3b82f6;
+      --accent-success: #10b981;
+      --accent-warning: #f59e0b;
+      --accent-shield: #60a5fa;
+      --border-color: #334155;
+    }
+
+    * {
+      box-sizing: border-box;
       margin: 0;
+      padding: 0;
     }
-    .card {
-      background: #1e293b;
-      padding: 2.5rem;
-      border-radius: 1rem;
-      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
-      text-align: center;
-      max-width: 450px;
-      border: 1px solid #334155;
+
+    body {
+      background-color: #0f172a;
+      color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem 1rem;
     }
-    .badge {
-      display: inline-block;
-      background: #10b981;
-      color: #064e3b;
-      font-weight: bold;
-      padding: 0.25rem 0.75rem;
+
+    .container {
+      width: 100%;
+      max-width: 960px;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    header {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      border-bottom: 1px solid var(--border-color);
+      padding-bottom: 1.5rem;
+    }
+
+    .header-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+    }
+
+    .title-group {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .title-icon {
+      font-size: 2rem;
+    }
+
+    h1 {
+      font-size: 1.75rem;
+      font-weight: 700;
+      letter-spacing: -0.025em;
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: rgba(16, 185, 129, 0.15);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      padding: 0.35rem 0.85rem;
       border-radius: 9999px;
       font-size: 0.875rem;
-      margin-bottom: 1rem;
+      font-weight: 600;
     }
-    h1 {
-      margin: 0 0 0.5rem 0;
-      font-size: 1.75rem;
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      background: #10b981;
+      border-radius: 50%;
+      box-shadow: 0 0 8px #10b981;
+      animation: pulse 2s infinite;
     }
-    p {
-      color: #94a3b8;
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(0.85); }
+    }
+
+    .subtitle {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+    }
+
+    /* Daily Spark Banner */
+    .spark-card {
+      background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(147, 51, 234, 0.08));
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      border-radius: 1rem;
+      padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .spark-header {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      color: #93c5fd;
+      font-size: 1.1rem;
+      font-weight: 600;
+    }
+
+    .spark-text {
+      font-size: 1.15rem;
       line-height: 1.5;
+      font-weight: 500;
+      color: #e2e8f0;
+      font-style: italic;
+    }
+
+    /* Participants Grid */
+    .section-title {
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: var(--text-main);
+      margin-top: 0.5rem;
+    }
+
+    .participants-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 1.25rem;
+    }
+
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 1rem;
+      padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+      transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .card:hover {
+      transform: translateY(-2px);
+      border-color: #475569;
+      box-shadow: 0 12px 24px -8px rgba(0, 0, 0, 0.4);
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 1rem;
+    }
+
+    .user-info {
+      display: flex;
+      align-items: center;
+      gap: 0.85rem;
+    }
+
+    .user-avatar {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 1.25rem;
+      background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+      color: #ffffff;
+      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+    }
+
+    .user-avatar.sister {
+      background: linear-gradient(135deg, #ec4899, #f43f5e);
+      box-shadow: 0 4px 12px rgba(236, 72, 153, 0.3);
+    }
+
+    .user-details h2 {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+
+    .badge {
+      display: inline-block;
+      background: rgba(59, 130, 246, 0.15);
+      color: #93c5fd;
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      padding: 0.25rem 0.65rem;
+      border-radius: 9999px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+    }
+
+    .metrics-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.75rem;
+      background: rgba(15, 23, 42, 0.6);
+      padding: 1rem;
+      border-radius: 0.75rem;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .metric {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+
+    .metric-label {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .metric-value {
+      font-size: 1.35rem;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+
+    .card-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-top: 0.5rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .today-status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.35rem 0.75rem;
+      border-radius: 9999px;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+
+    .status-completed {
+      background: rgba(16, 185, 129, 0.15);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+
+    .status-shielded {
+      background: rgba(96, 165, 250, 0.15);
+      color: #93c5fd;
+      border: 1px solid rgba(96, 165, 250, 0.3);
+    }
+
+    .status-pending {
+      background: rgba(245, 158, 11, 0.15);
+      color: #fbbf24;
+      border: 1px solid rgba(245, 158, 11, 0.3);
+    }
+
+    /* Footer & Meta */
+    footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
+      margin-top: 1rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--border-color);
+      color: var(--text-muted);
+      font-size: 0.85rem;
+    }
+
+    .btn-refresh {
+      background: #334155;
+      color: #f8fafc;
+      border: none;
+      padding: 0.4rem 0.85rem;
+      border-radius: 0.5rem;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 600;
+      transition: background 0.2s;
+    }
+
+    .btn-refresh:hover {
+      background: #475569;
+    }
+
+    .loading-state {
+      text-align: center;
+      padding: 3rem;
+      color: var(--text-muted);
+      font-size: 1.1rem;
     }
   </style>
 </head>
 <body>
-  <div class="card">
-    <div class="badge">● Online</div>
-    <h1>Telegram English Bot</h1>
-    <p>El bot está activo y funcionando en producción con Gemini AI y Vercel Serverless.</p>
+  <div class="container">
+    <header>
+      <div class="header-top">
+        <div class="title-group">
+          <span class="title-icon">🇬🇧</span>
+          <div>
+            <h1>English Tracker Bot</h1>
+            <p class="subtitle">Monitoreo en vivo de constancia diaria impulsado por Gemini AI</p>
+          </div>
+        </div>
+        <div class="status-pill">
+          <span class="status-dot"></span>
+          <span>● Bot Operativo en Vercel</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Daily Spark Card -->
+    <div id="daily-spark" class="spark-card">
+      <div class="spark-header">
+        <span>💡 Reto de Hoy</span>
+      </div>
+      <p id="daily-spark-text" class="spark-text">Cargando el disparador temático del día...</p>
+    </div>
+
+    <!-- Participants Grid -->
+    <h2 class="section-title">Participantes</h2>
+    <div id="participants-container" class="participants-grid">
+      <div class="card loading-state">
+        Cargando estado de participantes desde /api/status...
+      </div>
+    </div>
+
+    <footer>
+      <div>
+        <span>Última sincronización: </span>
+        <strong id="last-updated-time">--:--:--</strong>
+      </div>
+      <div>
+        <button class="btn-refresh" onclick="loadStatus()">↻ Actualizar</button>
+      </div>
+    </footer>
   </div>
+
+  <script>
+    async function loadStatus() {
+      try {
+        const res = await fetch('/api/status');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        render(data);
+      } catch (err) {
+        console.error('Error fetching /api/status:', err);
+        const container = document.getElementById('participants-container');
+        if (container) {
+          container.innerHTML = `
+            <div class="card" style="grid-column: 1 / -1; text-align: center; color: #f87171;">
+              ⚠️ Error al sincronizar con /api/status. Reintentando en breve...
+            </div>
+          `;
+        }
+      }
+    }
+
+    function render(data) {
+      if (!data) return;
+
+      // Update Daily Spark
+      const sparkEl = document.getElementById('daily-spark-text');
+      if (sparkEl && data.dailySpark) {
+        sparkEl.textContent = data.dailySpark;
+      }
+
+      // Update Last Updated Timestamp
+      const timeEl = document.getElementById('last-updated-time');
+      if (timeEl) {
+        timeEl.textContent = data.updatedAt ? new Date(data.updatedAt).toLocaleTimeString() : new Date().toLocaleTimeString();
+      }
+
+      // Render Participants
+      const container = document.getElementById('participants-container');
+      if (!container || !Array.isArray(data.participants)) return;
+
+      container.innerHTML = data.participants.map(participant => {
+        const isSister = participant.name.toLowerCase().includes('sister') || participant.name.toLowerCase().includes('francy');
+        const initial = participant.name.charAt(0).toUpperCase();
+
+        let statusClass = 'status-pending';
+        let statusText = 'Pendiente ⏳';
+
+        if (participant.checkedInToday || participant.todayStatus === 'completed') {
+          statusClass = 'status-completed';
+          statusText = '¡Completado Hoy! 🎯';
+        } else if (participant.shieldedToday || participant.todayStatus === 'shielded') {
+          statusClass = 'status-shielded';
+          statusText = 'Escudo Activo 🛡️';
+        }
+
+        const shieldsIcons = '🛡️ '.repeat(Math.max(0, participant.shields || 0)).trim() || 'Sin escudos';
+
+        return `
+          <div class="card">
+            <div class="card-header">
+              <div class="user-info">
+                <div class="user-avatar ${isSister ? 'sister' : ''}">${initial}</div>
+                <div class="user-details">
+                  <h2>${escapeHtml(participant.name)}</h2>
+                  <span class="badge">${escapeHtml(participant.cefrLevel || 'A2')}</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="metrics-row">
+              <div class="metric">
+                <span class="metric-label">Racha</span>
+                <span class="metric-value">🔥 Racha: ${participant.streak} días</span>
+              </div>
+              <div class="metric">
+                <span class="metric-label">Escudos</span>
+                <span class="metric-value">🛡️ Escudos: ${participant.shields}</span>
+              </div>
+            </div>
+
+            <div class="card-footer">
+              <span class="today-status-pill ${statusClass}">${statusText}</span>
+              <span style="font-size: 0.85rem; color: #94a3b8;">${shieldsIcons}</span>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    // Initial load and periodic refresh
+    loadStatus();
+    setInterval(loadStatus, 60000);
+  </script>
 </body>
 </html>
