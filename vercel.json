@@ -20,6 +20,10 @@
       "dest": "/api/cron.js"
     },
     {
+      "src": "/api/status",
+      "dest": "/api/status.js"
+    },
+    {
       "src": "/(.*)",
       "dest": "/public/index.html"
     }
@@ -27,7 +31,7 @@
   "crons": [
     {
       "path": "/api/cron",
-      "schedule": "0 3 * * *"
+      "schedule": "0 6 * * *"
     }
   ]
 }

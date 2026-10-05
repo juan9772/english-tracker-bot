@@ -64,11 +64,46 @@ export async function getState() {
 }
 
 /**
+ * Helper to dynamically merge user records and safeguard streaks.
+ */
+function mergeUsersSafely(targetUsers, existingUsers, forceReset) {
+  if (!existingUsers || typeof existingUsers !== 'object') return;
+  
+  for (const [key, existingUser] of Object.entries(existingUsers)) {
+    if (!existingUser || typeof existingUser !== 'object') continue;
+    
+    if (!targetUsers[key]) {
+      // Do not drop existing users that were not in incoming state
+      targetUsers[key] = JSON.parse(JSON.stringify(existingUser));
+    } else {
+      const targetUser = targetUsers[key];
+      if (!targetUser.id && existingUser.id) targetUser.id = existingUser.id;
+      if (!targetUser.username && existingUser.username) targetUser.username = existingUser.username;
+      if (!targetUser.name && existingUser.name) targetUser.name = existingUser.name;
+      if (!targetUser.timezone && existingUser.timezone) targetUser.timezone = existingUser.timezone;
+      if (!targetUser.profile && existingUser.profile) targetUser.profile = existingUser.profile;
+      if (!targetUser.checkInHistory && existingUser.checkInHistory) targetUser.checkInHistory = existingUser.checkInHistory;
+      if (!targetUser.shieldHistory && existingUser.shieldHistory) targetUser.shieldHistory = existingUser.shieldHistory;
+      if (!targetUser.vocabulary && existingUser.vocabulary) targetUser.vocabulary = existingUser.vocabulary;
+      
+      // Streak protection: only allow decrease if forceReset flag is explicitly set
+      if ((targetUser.streak || 0) < (existingUser.streak || 0) && !forceReset) {
+        targetUser.streak = existingUser.streak;
+      }
+    }
+  }
+}
+
+/**
  * Persists the updated state back to Vercel KV or the mock state.
  * Implements strict safeguards to prevent accidental wiping of user IDs, usernames, streaks, and chatId.
  */
 export async function saveState(state) {
   if (process.env.MOCK_KV === 'true') {
+    if (mockState && mockState.users) {
+      if (!state.users) state.users = {};
+      mergeUsersSafely(state.users, mockState.users, state.forceReset);
+    }
     mockState = JSON.parse(JSON.stringify(state));
     return;
   }
@@ -76,11 +111,15 @@ export async function saveState(state) {
   try {
     const kv = await getKvClient();
     if (!kv) {
+      if (mockState && mockState.users) {
+        if (!state.users) state.users = {};
+        mergeUsersSafely(state.users, mockState.users, state.forceReset);
+      }
       mockState = JSON.parse(JSON.stringify(state));
       return;
     }
 
-    // Protection Safeguard: Merge with existing Redis state to prevent accidental wiping of user IDs, usernames, or streaks
+    // Protection Safeguard: Merge with existing Redis state to prevent accidental wiping of user data or streaks
     try {
       const existingRaw = await kv.get(KV_STATE_KEY);
       if (existingRaw) {
@@ -91,24 +130,16 @@ export async function saveState(state) {
           state.chatId = existing.chatId;
         }
 
-        if (existing.users) {
-          // Preserve User A ID, Username, and Streak if higher
-          if (existing.users.userA && state.users?.userA) {
-            if (!state.users.userA.id && existing.users.userA.id) state.users.userA.id = existing.users.userA.id;
-            if (!state.users.userA.username && existing.users.userA.username) state.users.userA.username = existing.users.userA.username;
-            if ((state.users.userA.streak || 0) < (existing.users.userA.streak || 0) && !state.forceReset) {
-              state.users.userA.streak = existing.users.userA.streak;
-            }
-          }
-          // Preserve User B ID, Username, and Streak if higher
-          if (existing.users.userB && state.users?.userB) {
-            if (!state.users.userB.id && existing.users.userB.id) state.users.userB.id = existing.users.userB.id;
-            if (!state.users.userB.username && existing.users.userB.username) state.users.userB.username = existing.users.userB.username;
-            if ((state.users.userB.streak || 0) < (existing.users.userB.streak || 0) && !state.forceReset) {
-              state.users.userB.streak = existing.users.userB.streak;
-            }
-          }
+        // Preserve dailySpark if not set in incoming state
+        if (!state.dailySpark && existing.dailySpark) {
+          state.dailySpark = existing.dailySpark;
         }
+
+        // Dynamically merge all users while safeguarding streaks unless forceReset is set
+        if (!state.users || typeof state.users !== 'object') {
+          state.users = {};
+        }
+        mergeUsersSafely(state.users, existing.users, state.forceReset);
       }
     } catch (e) {
       console.warn('Non-fatal error reading current state for protection merge:', e);
@@ -129,7 +160,17 @@ export async function saveState(state) {
  * Sets the mock state directly. Useful for unit testing.
  */
 export function setMockState(state) {
-  mockState = JSON.parse(JSON.stringify(state));
+  mockState = state ? JSON.parse(JSON.stringify(state)) : null;
+}
+
+/**
+ * Returns an array of all active users in state with their key.
+ */
+export function getUsers(state) {
+  if (!state || !state.users || typeof state.users !== 'object') return [];
+  return Object.entries(state.users)
+    .filter(([_, user]) => user && typeof user === 'object')
+    .map(([key, user]) => ({ key, ...user }));
 }
 
 /**
@@ -138,71 +179,120 @@ export function setMockState(state) {
 export function getInitialState() {
   return {
     chatId: null,
+    dailySpark: "What is one English habit you are proud of?",
     users: {
       userA: {
         id: null,
         username: null,
-        name: process.env.USER_A_NAME || 'Usuario A',
+        name: process.env.USER_A_NAME || 'Juan',
         timezone: 'America/Argentina/Buenos_Aires',
         streak: 0,
         shields: 2,
         lastCheckIn: null,
         lastShieldUsedDate: null,
         lastEvaluatedDate: null,
-        lastShieldResetDate: null
+        lastShieldResetDate: null,
+        checkInHistory: {},
+        profile: {
+          cefrLevel: 'B2',
+          strengths: ['Natural phrasing', 'Abstract vocabulary', 'Complex subordinate clauses'],
+          focusAreas: ['Preposition collocations', 'Third conditional inversion'],
+          lastUpdated: new Date().toISOString().slice(0, 10)
+        }
       },
       userB: {
         id: null,
         username: null,
-        name: process.env.USER_B_NAME || 'Usuario B',
+        name: process.env.USER_B_NAME || 'Sister Francy',
         timezone: 'America/Mexico_City',
         streak: 0,
         shields: 2,
         lastCheckIn: null,
         lastShieldUsedDate: null,
         lastEvaluatedDate: null,
-        lastShieldResetDate: null
+        lastShieldResetDate: null,
+        checkInHistory: {},
+        profile: {
+          cefrLevel: 'B1',
+          strengths: ['Clear expression', 'Past tense narrative'],
+          focusAreas: ['Listen vs hear', 'Modal auxiliary nuances'],
+          lastUpdated: new Date().toISOString().slice(0, 10)
+        }
       }
     }
   };
 }
 
 /**
- * Matches a Telegram message's sender to a key ('userA' or 'userB') in our state.
- * Uses USER_A_USERNAME / USER_B_USERNAME env vars (or IDs if they were previously saved).
+ * Robust user lookup supporting userA/userB and arbitrary dynamic users.
  */
 export function findUserKey(state, msg) {
-  if (!msg || !msg.from) return null;
+  if (!msg || !msg.from || !state || !state.users) return null;
   
-  const fromId = msg.from.id.toString();
-  const fromUsername = (msg.from.username || '').toLowerCase();
-  
-  // 1. Check if ID already matched in state
-  if (state.users.userA.id === fromId) return 'userA';
-  if (state.users.userB.id === fromId) return 'userB';
-  
-  // 2. Check if username matches env vars
+  const fromId = msg.from.id ? msg.from.id.toString() : '';
+  const fromUsername = (msg.from.username || '').toLowerCase().replace(/^@/, '').trim();
+
+  // 1. Direct key match (e.g. if keyed by Telegram ID)
+  if (fromId && state.users[fromId]) return fromId;
+
+  // 2. Check if ID matches an existing user's .id property
+  if (fromId) {
+    for (const [key, user] of Object.entries(state.users)) {
+      if (user?.id && user.id.toString() === fromId) {
+        return key;
+      }
+    }
+  }
+
+  // 3. Check if username matches an existing user's .username property (case-insensitive)
+  if (fromUsername) {
+    for (const [key, user] of Object.entries(state.users)) {
+      if (user?.username && user.username.toLowerCase().replace(/^@/, '').trim() === fromUsername) {
+        return key;
+      }
+    }
+  }
+
+  // 4. Backward-compatible environment variable bindings
   const envAUser = (process.env.USER_A_USERNAME || '').replace(/^@/, '').toLowerCase().trim();
   const envBUser = (process.env.USER_B_USERNAME || '').replace(/^@/, '').toLowerCase().trim();
-  
-  if (envAUser && fromUsername === envAUser) {
-    return 'userA';
-  }
-  if (envBUser && fromUsername === envBUser) {
+  if (envAUser && fromUsername === envAUser && state.users.userA) return 'userA';
+  if (envBUser && fromUsername === envBUser && state.users.userB) return 'userB';
+
+  const envAId = (process.env.USER_A_ID || '').trim();
+  const envBId = (process.env.USER_B_ID || '').trim();
+  if (envAId && fromId === envAId && state.users.userA) return 'userA';
+  if (envBId && fromId === envBId && state.users.userB) return 'userB';
+
+  // 5. Auto-bind User B (sister without username fallback)
+  if (!msg.from.is_bot && state.users.userB && !state.users.userB.id) {
     return 'userB';
   }
-  
-  // 3. Fallback to check if ID matches env vars (if user knows their ID and set it in env)
-  const envAId = process.env.USER_A_ID;
-  const envBId = process.env.USER_B_ID;
-  
-  if (envAId && fromId === envAId) return 'userA';
-  if (envBId && fromId === envBId) return 'userB';
-  
-  // 4. Auto-bind User B: If sender is not a bot, not User A, and User B isn't bound yet,
-  // automatically register this sender as User B (ideal when User B doesn't have a Telegram @username)
-  if (!msg.from.is_bot && !state.users.userB.id) {
-    return 'userB';
+
+  // 6. Dynamic registration for new group participants
+  if (!msg.from.is_bot && fromId && process.env.ALLOW_DYNAMIC_USERS !== 'false') {
+    const newKey = fromId;
+    const fullName = [msg.from.first_name, msg.from.last_name].filter(Boolean).join(' ') || `User ${fromId}`;
+    state.users[newKey] = {
+      id: fromId,
+      username: msg.from.username || null,
+      name: fullName,
+      timezone: process.env.DEFAULT_TIMEZONE || 'America/Argentina/Buenos_Aires',
+      streak: 0,
+      shields: 2,
+      lastCheckIn: null,
+      lastShieldUsedDate: null,
+      lastEvaluatedDate: null,
+      lastShieldResetDate: null,
+      checkInHistory: {},
+      profile: {
+        cefrLevel: 'A2',
+        strengths: ['Initial engagement'],
+        focusAreas: ['Daily vocabulary consistency'],
+        lastUpdated: new Date().toISOString().slice(0, 10)
+      }
+    };
+    return newKey;
   }
 
   return null;

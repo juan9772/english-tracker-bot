@@ -1,51 +1,16 @@
 import { saveState } from './_db.js';
-import { sendTelegramMessage } from './_telegram.js';
+import {
+  sendTelegramMessage,
+  formatTelegramHtml,
+  balanceHtmlTags,
+  chunkTelegramHtml,
+  createInlineKeyboard
+} from './_telegram.js';
 import { getLocalDateString } from './_time.js';
 
+export { formatTelegramHtml, balanceHtmlTags, chunkTelegramHtml, createInlineKeyboard };
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-/**
- * Converts Markdown formatting (headers, bold, italics, blockquotes, code)
- * into Telegram-compatible HTML tags (<b>, <i>, <code>, <blockquote>, etc.)
- */
-export function formatTelegramHtml(text) {
-  if (!text) return '';
-
-  let html = text;
-
-  // Convert headers (### Header, ## Header, # Header) to <b>Header</b>
-  html = html.replace(/^#{1,6}\s+(.+)$/gm, '<b>$1</b>');
-
-  // Convert bold: **text** or __text__ -> <b>text</b>
-  html = html.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
-  html = html.replace(/__(.*?)__/g, '<b>$1</b>');
-
-  // Convert italics: *text* -> <i>text</i> (if not part of **)
-  html = html.replace(/(?<!\*)\*([^\*\s][^\*]*?)\*(?!\*)/g, '<i>$1</i>');
-
-  // Convert blockquotes: > line1\n> line2 -> <blockquote>line1\nline2</blockquote>
-  html = html.replace(/(?:^[ \t]*>[ \t]*[^\n]*(?:\n|$))+/gm, (match) => {
-    const cleanContent = match
-      .split('\n')
-      .map(line => line.replace(/^[ \t]*>[ \t]?/, ''))
-      .join('\n')
-      .trim();
-    return `<blockquote>${cleanContent}</blockquote>\n`;
-  });
-
-  // Protect valid Telegram HTML tags, escape remaining < and > to prevent Telegram 400 parsing errors
-  const validTagRegex = /<\/?(b|strong|i|em|code|pre|blockquote|s|strike|u|a)(\s+href="[^"]*")?\s*\/?>/gi;
-  const tags = [];
-  html = html.replace(validTagRegex, (tag) => {
-    tags.push(tag);
-    return `___TAG_${tags.length - 1}___`;
-  });
-
-  html = html.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  html = html.replace(/___TAG_(\d+)___/g, (_, index) => tags[parseInt(index, 10)]);
-
-  return html.trim();
-}
 
 /**
  * Calls Gemini API with exponential backoff retries and fallback models.
@@ -259,7 +224,7 @@ export async function executeParsedCommand(user, userKey, command, args, geminiR
 
   if (command === 'shield') {
     if (user.lastCheckIn === currentDateStr) {
-      const reply = geminiResult && geminiResult.dynamicReply ? geminiResult.dynamicReply :
+      const reply = geminiResult && geminiResult.dynamicReply ? formatTelegramHtml(geminiResult.dynamicReply) :
         `¡Che, <b>${user.name}</b>! Hoy ya hiciste tu check-in de inglés, así que no necesitas gastar un escudo. ¡Guárdalo para cuando de verdad te haga falta! 😉\n\n` +
         `<i>Good decision!</i> "Use your shields wisely! 🛡️"`;
       
@@ -268,7 +233,7 @@ export async function executeParsedCommand(user, userKey, command, args, geminiR
     }
 
     if (user.lastShieldUsedDate === currentDateStr) {
-      const reply = geminiResult && geminiResult.dynamicReply ? geminiResult.dynamicReply :
+      const reply = geminiResult && geminiResult.dynamicReply ? formatTelegramHtml(geminiResult.dynamicReply) :
         `¡Ojo! Hoy ya activaste tu escudo protector, <b>${user.name}</b>. ¡Estás a salvo por hoy! 🛡️ Descansa tranquilo.\n\n` +
         `<i>Take it easy!</i> "Enjoy your day off! 🍕"`;
       
@@ -281,9 +246,10 @@ export async function executeParsedCommand(user, userKey, command, args, geminiR
       user.lastShieldUsedDate = currentDateStr;
       await saveState(state);
 
+      const formattedShieldReply = geminiResult && geminiResult.dynamicReply ? formatTelegramHtml(geminiResult.dynamicReply) : '';
       const reply = geminiResult && geminiResult.dynamicReply ?
         `🛡️ ¡Escudo activado para hoy, <b>${user.name}</b>!\n\n` +
-        `<i>${geminiResult.dynamicReply}</i>\n\n` +
+        `${formattedShieldReply}\n\n` +
         `Te quedan <b>${user.shields} escudos</b> para esta semana.` :
         `🛡️ ¡Escudo activado para hoy, <b>${user.name}</b>! Quedas libre del inglés por este día sin perder tu racha de 🔥 <b>${user.streak} días</b>. Te quedan <b>${user.shields} escudos</b> para esta semana.\n\n` +
         `<i>Enjoy your break!</i> "Rest is part of the work. See you tomorrow! 💤"`;
@@ -291,7 +257,7 @@ export async function executeParsedCommand(user, userKey, command, args, geminiR
       await sendTelegramMessage(chatId, reply);
       return 'Shield activated';
     } else {
-      const reply = geminiResult && geminiResult.dynamicReply ? geminiResult.dynamicReply :
+      const reply = geminiResult && geminiResult.dynamicReply ? formatTelegramHtml(geminiResult.dynamicReply) :
         `¡Uf, qué mala suerte, <b>${user.name}</b>! 😰 Ya no te quedan escudos disponibles para esta semana (recuerda que se resetean los lunes). ¡Vas a tener que meterle pata y hacer <code>/done</code> para no perder la racha!\n\n` +
         `<i>Don't give up!</i> "No pain, no gain! You've got this! 💥"`;
       
@@ -332,7 +298,7 @@ export async function executeParsedCommand(user, userKey, command, args, geminiR
       shieldsB = '🛡️ <b>Escudos:</b> -';
     }
 
-    const reportHeader = geminiResult && geminiResult.dynamicReply ? geminiResult.dynamicReply + '\n\n' : '';
+    const reportHeader = geminiResult && geminiResult.dynamicReply ? formatTelegramHtml(geminiResult.dynamicReply) + '\n\n' : '';
 
     const report = reportHeader +
       `📊 <b>ESTADO DE CONSTANCIA EN INGLÉS</b> 🇬🇧\n\n` +

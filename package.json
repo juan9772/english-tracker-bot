@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node scratch/test-flow.js"
+    "test": "node test/run-all-tests.js && node scratch/test-flow.js"
   },
   "dependencies": {
     "@upstash/redis": "^1.38.0",
