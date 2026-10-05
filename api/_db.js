@@ -55,7 +55,29 @@ export async function getState() {
       await saveState(initial);
       return initial;
     }
-    return typeof state === 'string' ? JSON.parse(state) : state;
+    let parsed = typeof state === 'string' ? JSON.parse(state) : state;
+    const RESET_MIGRATION_VERSION = '2026-10-04_streak_reset_v1';
+    if (parsed && parsed.resetMigrationVersion !== RESET_MIGRATION_VERSION) {
+      if (parsed.users && typeof parsed.users === 'object') {
+        const { getLocalDateString, getPreviousDateString } = await import('./_time.js');
+        const now = new Date();
+        for (const [_, user] of Object.entries(parsed.users)) {
+          if (!user || typeof user !== 'object') continue;
+          user.streak = 0;
+          user.shields = 2;
+          user.lastCheckIn = null;
+          user.lastShieldUsedDate = null;
+          const userToday = getLocalDateString(now, user.timezone || 'America/Argentina/Buenos_Aires');
+          user.lastEvaluatedDate = getPreviousDateString(userToday);
+          user.lastShieldResetDate = userToday;
+        }
+      }
+      parsed.resetMigrationVersion = RESET_MIGRATION_VERSION;
+      parsed.forceReset = true;
+      await saveState(parsed);
+      delete parsed.forceReset;
+    }
+    return parsed;
   } catch (err) {
     console.error('Error getting state from Redis KV, falling back to initial state:', err);
     if (!mockState) mockState = getInitialState();
@@ -133,6 +155,11 @@ export async function saveState(state) {
         // Preserve dailySpark if not set in incoming state
         if (!state.dailySpark && existing.dailySpark) {
           state.dailySpark = existing.dailySpark;
+        }
+
+        // Preserve resetMigrationVersion if present in Redis
+        if (!state.resetMigrationVersion && existing.resetMigrationVersion) {
+          state.resetMigrationVersion = existing.resetMigrationVersion;
         }
 
         // Dynamically merge all users while safeguarding streaks unless forceReset is set
